@@ -30,7 +30,7 @@ jobs:
         run: |
           set -e
 
-          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
 
           echo "Android SDK: $SDK_ROOT"
 
@@ -42,19 +42,21 @@ jobs:
             exit 1
           fi
 
-          echo "Using: $SDKMANAGER"
-
           yes | "$SDKMANAGER" --licenses >/dev/null || true
 
           "$SDKMANAGER" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
+          echo "sdk.dir=$SDK_ROOT" > local.properties
+
+          cat local.properties
+
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        run: gradle assembleDebug --console=plain
 
       - name: Build release AAB
-        run: gradle bundleRelease --stacktrace
+        run: gradle bundleRelease --console=plain
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
