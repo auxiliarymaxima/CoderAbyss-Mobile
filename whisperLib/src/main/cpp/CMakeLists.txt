@@ -46,6 +46,13 @@ find_library(LOG_LIB log)
 
 include(FetchContent)
 
+# Keep Whisper's GGML private to Whisper.
+# llama.cpp ships its own GGML shared libraries, so building
+# Whisper's GGML statically prevents duplicate .so files.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
+set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
+
 FetchContent_Declare(
     ggml
     SOURCE_DIR ${WHISPER_ROOT}/ggml
