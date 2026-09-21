@@ -3,9 +3,10 @@ package com.coderabyss.mobile
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 
 private val AbyssBlack = Color(0xFF020810)
 private val AbyssPanel = Color(0xFF061522)
@@ -45,19 +47,60 @@ private val AbyssBlue2 = Color(0xFF248DFF)
 private val AbyssGreen = Color(0xFF38F6B4)
 private val AbyssText = Color(0xFFEAF8FF)
 private val AbyssMuted = Color(0xFF86A9BB)
+private val AbyssDanger = Color(0xFFFF6D79)
 
-class MainActivity : ComponentActivity() {
+private enum class AppPage {
+    HOME,
+    PROJECTS,
+    LIBRARY,
+    SETTINGS,
+    MODELS,
+    FEATURE
+}
 
-    override fun onCreate(savedInstanceState: Bundle?) {
+private enum class FeatureType(
+    val label: String,
+    val description: String
+) {
+
+    APP(
+        "Build an app",
+        "Plan and generate software using your selected local coding model."
+    ),
+
+    VIDEO(
+        "Create video",
+        "Prepare scripts, scenes and prompts locally. Video model runtime comes next."
+    ),
+
+    RESEARCH(
+        "Research paper",
+        "Draft, structure and analyze documents using a local text model."
+    ),
+
+    VISUALS(
+        "Create visuals",
+        "Prepare image prompts and projects. Local image runtime comes next."
+    )
+}
+
+class MainActivity :
+    ComponentActivity() {
+
+    override fun onCreate(
+        savedInstanceState: Bundle?
+    ) {
         super.onCreate(savedInstanceState)
 
         setContent {
+
             MaterialTheme(
-                colorScheme = darkColorScheme(
-                    primary = AbyssBlue,
-                    background = AbyssBlack,
-                    surface = AbyssPanel
-                )
+                colorScheme =
+                    darkColorScheme(
+                        primary = AbyssBlue,
+                        background = AbyssBlack,
+                        surface = AbyssPanel
+                    )
             ) {
                 CoderAbyssApp()
             }
@@ -66,218 +109,383 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun CoderAbyssApp() {
+private fun CoderAbyssApp() {
 
-    var selectedTab by remember { mutableIntStateOf(0) }
+    val context =
+        LocalContext.current
+
+    val modelManager =
+        remember {
+            OfflineModelManager(
+                context.applicationContext
+            )
+        }
+
+    var page by remember {
+        mutableStateOf(
+            AppPage.HOME
+        )
+    }
+
+    var feature by remember {
+        mutableStateOf(
+            FeatureType.APP
+        )
+    }
+
+    val selectedBottom =
+        when (page) {
+
+            AppPage.HOME -> 0
+            AppPage.PROJECTS -> 1
+            AppPage.LIBRARY -> 2
+            AppPage.SETTINGS -> 3
+            else -> -1
+        }
 
     Scaffold(
         containerColor = AbyssBlack,
+
         bottomBar = {
+
             AbyssBottomBar(
-                selected = selectedTab,
-                onSelected = { selectedTab = it }
+                selected =
+                    selectedBottom,
+
+                onSelected = {
+
+                    page =
+                        when (it) {
+
+                            0 -> AppPage.HOME
+                            1 -> AppPage.PROJECTS
+                            2 -> AppPage.LIBRARY
+
+                            else ->
+                                AppPage.SETTINGS
+                        }
+                }
             )
         }
     ) { padding ->
 
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color(0xFF02070D),
-                            Color(0xFF02101B),
-                            Color(0xFF020810)
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color(0xFF02070D),
+                                Color(0xFF02101B),
+                                Color(0xFF020810)
+                            )
                         )
                     )
-                )
         ) {
 
-            when (selectedTab) {
-                0 -> HomeScreen()
-                1 -> PlaceholderScreen(
-                    title = "Projects",
-                    icon = Icons.Rounded.Folder
-                )
-                2 -> PlaceholderScreen(
-                    title = "Library",
-                    icon = Icons.Rounded.Description
-                )
-                else -> PlaceholderScreen(
-                    title = "Settings",
-                    icon = Icons.Rounded.Settings
-                )
+            when (page) {
+
+                AppPage.HOME ->
+
+                    HomeScreen(
+                        modelManager =
+                            modelManager,
+
+                        onModels = {
+                            page =
+                                AppPage.MODELS
+                        },
+
+                        onFeature = {
+                            feature = it
+                            page =
+                                AppPage.FEATURE
+                        }
+                    )
+
+                AppPage.MODELS ->
+
+                    ModelManagerScreen(
+                        manager =
+                            modelManager,
+
+                        onBack = {
+                            page =
+                                AppPage.HOME
+                        }
+                    )
+
+                AppPage.FEATURE ->
+
+                    FeatureWorkspace(
+                        feature =
+                            feature,
+
+                        manager =
+                            modelManager,
+
+                        onBack = {
+                            page =
+                                AppPage.HOME
+                        },
+
+                        onModels = {
+                            page =
+                                AppPage.MODELS
+                        }
+                    )
+
+                AppPage.PROJECTS ->
+
+                    PlaceholderScreen(
+                        title = "Projects",
+                        icon =
+                            Icons.Rounded.Folder,
+                        subtitle =
+                            "Your local Coder Abyss projects will live here."
+                    )
+
+                AppPage.LIBRARY ->
+
+                    LibraryScreen(
+                        modelManager
+                    )
+
+                AppPage.SETTINGS ->
+
+                    SettingsScreen(
+                        modelManager
+                    )
             }
         }
     }
 }
 
 @Composable
-fun HomeScreen() {
+private fun HomeScreen(
+    modelManager: OfflineModelManager,
+    onModels: () -> Unit,
+    onFeature:
+        (FeatureType) -> Unit
+) {
 
-    val context = LocalContext.current
-    var listening by remember { mutableStateOf(false) }
+    val context =
+        LocalContext.current
+
+    var microphoneGranted by remember {
+        mutableStateOf(
+            ContextCompat
+                .checkSelfPermission(
+                    context,
+                    Manifest.permission
+                        .RECORD_AUDIO
+                ) ==
+                    PackageManager
+                        .PERMISSION_GRANTED
+        )
+    }
 
     val microphoneLauncher =
         rememberLauncherForActivityResult(
-            ActivityResultContracts.RequestPermission()
+            ActivityResultContracts
+                .RequestPermission()
         ) { granted ->
-            listening = granted
+
+            microphoneGranted =
+                granted
         }
 
-    fun microphonePressed() {
+    val whisperInstalled =
+        ModelCatalog.models.any {
 
-        val granted =
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.RECORD_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-
-        if (granted) {
-            listening = !listening
-        } else {
-            microphoneLauncher.launch(
-                Manifest.permission.RECORD_AUDIO
-            )
+            it.kind ==
+                ModelKind.SPEECH &&
+                    modelManager
+                        .isInstalled(it)
         }
-    }
+
+    val installedCount =
+        modelManager
+            .installedModels()
+            .size
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 18.dp)
-            .padding(top = 18.dp, bottom = 28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(
+                    rememberScrollState()
+                )
+                .padding(
+                    horizontal = 18.dp
+                )
+                .padding(
+                    top = 18.dp,
+                    bottom = 28.dp
+                ),
+
+        horizontalAlignment =
+            Alignment.CenterHorizontally
     ) {
 
         Header()
 
-        Spacer(Modifier.height(26.dp))
+        Spacer(
+            Modifier.height(26.dp)
+        )
 
         AssistantFace()
 
-        Spacer(Modifier.height(18.dp))
-
-        MicrophoneButton(
-            listening = listening,
-            onClick = { microphonePressed() }
+        Spacer(
+            Modifier.height(18.dp)
         )
 
-        Spacer(Modifier.height(7.dp))
+        MicrophoneButton(
+            ready =
+                whisperInstalled,
+
+            onClick = {
+
+                if (!whisperInstalled) {
+
+                    Toast.makeText(
+                        context,
+                        "Download a Whisper model first.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                    onModels()
+
+                } else if (
+                    !microphoneGranted
+                ) {
+
+                    microphoneLauncher.launch(
+                        Manifest.permission
+                            .RECORD_AUDIO
+                    )
+
+                } else {
+
+                    Toast.makeText(
+                        context,
+                        "Whisper model is installed. Native transcription engine is the next integration.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        )
+
+        Spacer(
+            Modifier.height(8.dp)
+        )
 
         Text(
             text =
-                if (listening)
-                    "Listening with Whisper..."
+                if (whisperInstalled)
+                    "Whisper model ready"
                 else
-                    "Tap to speak",
+                    "Tap to install Whisper",
+
             color = AbyssText,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight =
+                FontWeight.SemiBold,
             fontSize = 18.sp
         )
 
-        Spacer(Modifier.height(9.dp))
+        Spacer(
+            Modifier.height(10.dp)
+        )
 
-        Surface(
-            shape = RoundedCornerShape(50),
-            color = Color(0xFF07283A),
-            border = androidx.compose.foundation.BorderStroke(
-                1.dp,
-                Color(0xFF0B6282)
-            )
-        ) {
+        StatusPill(
+            text =
+                "$installedCount offline model" +
+                    if (installedCount == 1)
+                        ""
+                    else
+                        "s" +
+                            " installed"
+        )
 
-            Row(
-                modifier = Modifier.padding(
-                    horizontal = 16.dp,
-                    vertical = 7.dp
-                ),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        Spacer(
+            Modifier.height(28.dp)
+        )
 
-                Icon(
-                    imageVector = Icons.Rounded.GraphicEq,
-                    contentDescription = null,
-                    tint = AbyssBlue,
-                    modifier = Modifier.size(18.dp)
-                )
+        QuickActions(
+            onFeature
+        )
 
-                Spacer(Modifier.width(8.dp))
+        Spacer(
+            Modifier.height(18.dp)
+        )
 
-                Text(
-                    text =
-                        if (listening)
-                            "Whisper microphone active"
-                        else
-                            "Whisper ready on-device",
-                    color = Color(0xFFB8DCE9),
-                    fontSize = 12.sp
-                )
-            }
-        }
+        ModelsPanel(
+            manager =
+                modelManager,
 
-        Spacer(Modifier.height(28.dp))
+            onManage =
+                onModels
+        )
 
-        QuickActions()
+        Spacer(
+            Modifier.height(18.dp)
+        )
 
-        Spacer(Modifier.height(18.dp))
+        LocalFirstPanel()
 
-        ModelsPanel()
-
-        Spacer(Modifier.height(16.dp))
-
-        InternetPanel()
-
-        Spacer(Modifier.height(20.dp))
-
-        Text(
-            text = "Local mode is primary. Internet is optional.",
-            color = AbyssMuted,
-            fontSize = 11.sp
+        Spacer(
+            Modifier.height(22.dp)
         )
     }
 }
 
 @Composable
-fun Header() {
+private fun Header() {
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
+        modifier =
+            Modifier.fillMaxWidth(),
+
+        verticalAlignment =
+            Alignment.CenterVertically
     ) {
 
         LogoMark(
-            modifier = Modifier.size(46.dp)
+            Modifier.size(48.dp)
         )
 
-        Spacer(Modifier.width(12.dp))
+        Spacer(
+            Modifier.width(12.dp)
+        )
 
         Column(
-            modifier = Modifier.weight(1f)
+            modifier =
+                Modifier.weight(1f)
         ) {
 
             Row {
 
                 Text(
-                    text = "Coder ",
+                    "Coder ",
                     color = AbyssText,
                     fontSize = 25.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight =
+                        FontWeight.Bold
                 )
 
                 Text(
-                    text = "Abyss",
+                    "Abyss",
                     color = AbyssBlue,
                     fontSize = 25.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight =
+                        FontWeight.Bold
                 )
             }
 
             Text(
-                text = "YOUR AI COMPANION ON YOUR PHONE",
+                "YOUR AI COMPANION ON YOUR PHONE",
                 color = AbyssMuted,
                 fontSize = 9.sp,
                 letterSpacing = 1.5.sp
@@ -285,39 +493,56 @@ fun Header() {
         }
 
         Surface(
-            shape = RoundedCornerShape(50),
-            color = Color(0xFF052232),
-            border = androidx.compose.foundation.BorderStroke(
-                1.dp,
-                Color(0xFF07688A)
-            )
+            shape =
+                RoundedCornerShape(50),
+
+            color =
+                Color(0xFF052232),
+
+            border =
+                androidx.compose
+                    .foundation
+                    .BorderStroke(
+                        1.dp,
+                        Color(0xFF07688A)
+                    )
         ) {
 
             Row(
-                modifier = Modifier.padding(
-                    horizontal = 10.dp,
-                    vertical = 7.dp
-                ),
-                verticalAlignment = Alignment.CenterVertically
+                modifier =
+                    Modifier.padding(
+                        horizontal = 10.dp,
+                        vertical = 7.dp
+                    ),
+
+                verticalAlignment =
+                    Alignment.CenterVertically
             ) {
 
                 Icon(
-                    imageVector = Icons.Rounded.Lock,
-                    contentDescription = null,
+                    Icons.Rounded.Lock,
+                    null,
                     tint = AbyssBlue,
-                    modifier = Modifier.size(15.dp)
+                    modifier =
+                        Modifier.size(15.dp)
                 )
 
-                Spacer(Modifier.width(5.dp))
+                Spacer(
+                    Modifier.width(5.dp)
+                )
 
                 Text(
-                    text = "Local Only",
-                    color = Color(0xFF9EF9DE),
-                    fontWeight = FontWeight.Bold,
+                    "Local Only",
+                    color =
+                        Color(0xFF9EF9DE),
+                    fontWeight =
+                        FontWeight.Bold,
                     fontSize = 10.sp
                 )
 
-                Spacer(Modifier.width(6.dp))
+                Spacer(
+                    Modifier.width(7.dp)
+                )
 
                 Box(
                     Modifier
@@ -333,95 +558,91 @@ fun Header() {
 }
 
 @Composable
-fun LogoMark(
-    modifier: Modifier = Modifier
+private fun LogoMark(
+    modifier: Modifier
 ) {
 
-    Canvas(modifier = modifier) {
+    Canvas(modifier) {
 
         drawCircle(
-            brush = Brush.sweepGradient(
-                listOf(
-                    AbyssBlue,
-                    AbyssBlue2,
-                    AbyssBlue
-                )
-            ),
-            style = Stroke(
-                width = 5.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-        )
+            brush =
+                Brush.sweepGradient(
+                    listOf(
+                        AbyssBlue,
+                        AbyssBlue2,
+                        AbyssBlue
+                    )
+                ),
 
-        drawArc(
-            color = AbyssBlue,
-            startAngle = 205f,
-            sweepAngle = 80f,
-            useCenter = false,
-            topLeft = Offset(
-                size.width * 0.05f,
-                size.height * 0.05f
-            ),
-            size = Size(
-                size.width * 0.9f,
-                size.height * 0.9f
-            ),
-            style = Stroke(
-                width = 3.dp.toPx(),
-                cap = StrokeCap.Round
-            )
+            style =
+                Stroke(
+                    width =
+                        5.dp.toPx(),
+                    cap =
+                        StrokeCap.Round
+                )
         )
     }
 }
 
 @Composable
-fun AssistantFace() {
+private fun AssistantFace() {
 
     Box(
-        modifier = Modifier
-            .size(190.dp)
-            .clip(CircleShape)
-            .background(
-                Brush.radialGradient(
-                    listOf(
-                        Color(0xFF063A58),
-                        Color(0xFF031421),
-                        Color(0xFF01070B)
+        modifier =
+            Modifier
+                .size(190.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            Color(0xFF063A58),
+                            Color(0xFF031421),
+                            Color(0xFF01070B)
+                        )
                     )
                 )
-            )
-            .border(
-                2.dp,
-                AbyssBlue,
-                CircleShape
-            ),
-        contentAlignment = Alignment.Center
+                .border(
+                    2.dp,
+                    AbyssBlue,
+                    CircleShape
+                ),
+
+        contentAlignment =
+            Alignment.Center
     ) {
 
         Canvas(
-            modifier = Modifier.size(130.dp)
+            Modifier.size(130.dp)
         ) {
 
-            val eyeWidth = 34.dp.toPx()
-            val stroke = 7.dp.toPx()
+            val eye =
+                34.dp.toPx()
+
+            val stroke =
+                7.dp.toPx()
 
             drawArc(
                 color = AbyssBlue,
                 startAngle = 190f,
                 sweepAngle = 160f,
                 useCenter = false,
-                topLeft = Offset(
-                    size.width * .16f,
-                    size.height * .26f
-                ),
-                size = Size(
-                    eyeWidth,
-                    eyeWidth
-                ),
-                style = Stroke(
-                    width = stroke,
-                    cap = StrokeCap.Round
-                )
+                topLeft =
+                    Offset(
+                        size.width * .16f,
+                        size.height * .26f
+                    ),
+                size =
+                    Size(
+                        eye,
+                        eye
+                    ),
+                style =
+                    Stroke(
+                        stroke,
+                        cap =
+                            StrokeCap.Round
+                    )
             )
 
             drawArc(
@@ -429,276 +650,404 @@ fun AssistantFace() {
                 startAngle = 190f,
                 sweepAngle = 160f,
                 useCenter = false,
-                topLeft = Offset(
-                    size.width * .58f,
-                    size.height * .26f
-                ),
-                size = Size(
-                    eyeWidth,
-                    eyeWidth
-                ),
-                style = Stroke(
-                    width = stroke,
-                    cap = StrokeCap.Round
-                )
+                topLeft =
+                    Offset(
+                        size.width * .58f,
+                        size.height * .26f
+                    ),
+                size =
+                    Size(
+                        eye,
+                        eye
+                    ),
+                style =
+                    Stroke(
+                        stroke,
+                        cap =
+                            StrokeCap.Round
+                    )
             )
 
             drawArc(
-                color = Color(0xFF68A8FF),
+                color =
+                    Color(0xFF68A8FF),
                 startAngle = 20f,
                 sweepAngle = 140f,
                 useCenter = false,
-                topLeft = Offset(
-                    size.width * .34f,
-                    size.height * .57f
-                ),
-                size = Size(
-                    size.width * .32f,
-                    size.height * .18f
-                ),
-                style = Stroke(
-                    width = 5.dp.toPx(),
-                    cap = StrokeCap.Round
-                )
+                topLeft =
+                    Offset(
+                        size.width * .34f,
+                        size.height * .57f
+                    ),
+                size =
+                    Size(
+                        size.width * .32f,
+                        size.height * .18f
+                    ),
+                style =
+                    Stroke(
+                        5.dp.toPx(),
+                        cap =
+                            StrokeCap.Round
+                    )
             )
         }
     }
 }
 
 @Composable
-fun MicrophoneButton(
-    listening: Boolean,
+private fun MicrophoneButton(
+    ready: Boolean,
     onClick: () -> Unit
 ) {
 
     Box(
-        modifier = Modifier
-            .size(118.dp)
-            .clip(CircleShape)
-            .background(
-                Brush.radialGradient(
-                    listOf(
-                        if (listening)
-                            Color(0xFF08775F)
-                        else
-                            Color(0xFF0877A9),
-                        Color(0xFF062137)
+        modifier =
+            Modifier
+                .size(118.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            if (ready)
+                                Color(0xFF0877A9)
+                            else
+                                Color(0xFF182B35),
+
+                            Color(0xFF062137)
+                        )
                     )
                 )
-            )
-            .border(
-                3.dp,
-                if (listening)
-                    AbyssGreen
-                else
-                    AbyssBlue,
-                CircleShape
-            )
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
+                .border(
+                    3.dp,
+                    if (ready)
+                        AbyssBlue
+                    else
+                        AbyssMuted,
+                    CircleShape
+                )
+                .clickable {
+                    onClick()
+                },
+
+        contentAlignment =
+            Alignment.Center
     ) {
 
         Icon(
-            imageVector =
-                if (listening)
-                    Icons.Rounded.GraphicEq
-                else
-                    Icons.Rounded.Mic,
-            contentDescription = "Microphone",
+            Icons.Rounded.Mic,
+            "Microphone",
             tint =
-                if (listening)
-                    AbyssGreen
+                if (ready)
+                    Color(0xFF62E8FF)
                 else
-                    Color(0xFF62E8FF),
-            modifier = Modifier.size(53.dp)
+                    AbyssMuted,
+            modifier =
+                Modifier.size(53.dp)
         )
     }
 }
 
 @Composable
-fun QuickActions() {
+private fun StatusPill(
+    text: String
+) {
+
+    Surface(
+        shape =
+            RoundedCornerShape(50),
+        color =
+            Color(0xFF07283A),
+        border =
+            androidx.compose.foundation
+                .BorderStroke(
+                    1.dp,
+                    Color(0xFF0B6282)
+                )
+    ) {
+
+        Row(
+            modifier =
+                Modifier.padding(
+                    horizontal = 16.dp,
+                    vertical = 7.dp
+                ),
+
+            verticalAlignment =
+                Alignment.CenterVertically
+        ) {
+
+            Icon(
+                Icons.Rounded.Memory,
+                null,
+                tint = AbyssBlue,
+                modifier =
+                    Modifier.size(18.dp)
+            )
+
+            Spacer(
+                Modifier.width(8.dp)
+            )
+
+            Text(
+                text,
+                color =
+                    Color(0xFFB8DCE9),
+                fontSize = 12.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickActions(
+    onClick:
+        (FeatureType) -> Unit
+) {
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier =
+            Modifier.fillMaxWidth(),
+
         horizontalArrangement =
             Arrangement.spacedBy(8.dp)
     ) {
 
         QuickAction(
-            modifier = Modifier.weight(1f),
-            title = "Build\nan app",
-            icon = Icons.Rounded.Code
-        )
-
-        QuickAction(
-            modifier = Modifier.weight(1f),
-            title = "Create\nvideo",
-            icon = Icons.Rounded.PlayArrow
-        )
-
-        QuickAction(
-            modifier = Modifier.weight(1f),
-            title = "Research\npaper",
-            icon = Icons.Rounded.Description
-        )
-
-        QuickAction(
-            modifier = Modifier.weight(1f),
-            title = "Create\nvisuals",
-            icon = Icons.Rounded.Image
-        )
-    }
-}
-
-@Composable
-fun QuickAction(
-    modifier: Modifier,
-    title: String,
-    icon: ImageVector
-) {
-
-    Surface(
-        modifier = modifier.height(108.dp),
-        shape = RoundedCornerShape(17.dp),
-        color = AbyssPanel,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            Color(0xFF0A587A)
-        )
-    ) {
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            Modifier.weight(1f),
+            "Build\nan app",
+            Icons.Rounded.Code
         ) {
-
-            Icon(
-                imageVector = icon,
-                contentDescription = title,
-                tint = AbyssBlue,
-                modifier = Modifier.size(28.dp)
+            onClick(
+                FeatureType.APP
             )
+        }
 
-            Spacer(Modifier.height(9.dp))
+        QuickAction(
+            Modifier.weight(1f),
+            "Create\nvideo",
+            Icons.Rounded.PlayArrow
+        ) {
+            onClick(
+                FeatureType.VIDEO
+            )
+        }
 
-            Text(
-                text = title,
-                color = AbyssText,
-                textAlign = TextAlign.Center,
-                fontSize = 12.sp,
-                lineHeight = 15.sp,
-                fontWeight = FontWeight.SemiBold
+        QuickAction(
+            Modifier.weight(1f),
+            "Research\npaper",
+            Icons.Rounded.Description
+        ) {
+            onClick(
+                FeatureType.RESEARCH
+            )
+        }
+
+        QuickAction(
+            Modifier.weight(1f),
+            "Create\nvisuals",
+            Icons.Rounded.Image
+        ) {
+            onClick(
+                FeatureType.VISUALS
             )
         }
     }
 }
 
 @Composable
-fun ModelsPanel() {
+private fun QuickAction(
+    modifier: Modifier,
+    title: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
 
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        modifier =
+            modifier
+                .height(108.dp)
+                .clickable {
+                    onClick()
+                },
+
+        shape =
+            RoundedCornerShape(17.dp),
+
         color = AbyssPanel,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            Color(0xFF096283)
-        )
+
+        border =
+            androidx.compose.foundation
+                .BorderStroke(
+                    1.dp,
+                    Color(0xFF0A587A)
+                )
     ) {
 
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(8.dp),
+
+            horizontalAlignment =
+                Alignment.CenterHorizontally,
+
+            verticalArrangement =
+                Arrangement.Center
+        ) {
+
+            Icon(
+                icon,
+                title,
+                tint = AbyssBlue,
+                modifier =
+                    Modifier.size(28.dp)
+            )
+
+            Spacer(
+                Modifier.height(9.dp)
+            )
+
+            Text(
+                title,
+                color = AbyssText,
+                textAlign =
+                    TextAlign.Center,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                fontWeight =
+                    FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModelsPanel(
+    manager: OfflineModelManager,
+    onManage: () -> Unit
+) {
+
+    val installed =
+        manager.installedModels()
+
+    Surface(
+        modifier =
+            Modifier.fillMaxWidth(),
+
+        shape =
+            RoundedCornerShape(20.dp),
+
+        color = AbyssPanel,
+
+        border =
+            androidx.compose.foundation
+                .BorderStroke(
+                    1.dp,
+                    Color(0xFF096283)
+                )
+    ) {
+
+        Column(
+            Modifier.padding(16.dp)
         ) {
 
             Row(
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment =
+                    Alignment.CenterVertically
             ) {
 
                 Icon(
-                    imageVector = Icons.Rounded.ViewInAr,
-                    contentDescription = null,
+                    Icons.Rounded.ViewInAr,
+                    null,
                     tint = AbyssBlue
                 )
 
-                Spacer(Modifier.width(10.dp))
+                Spacer(
+                    Modifier.width(10.dp)
+                )
 
                 Column(
-                    modifier = Modifier.weight(1f)
+                    Modifier.weight(1f)
                 ) {
 
                     Text(
-                        text = "On-device Models",
+                        "On-device Models",
                         color = AbyssText,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight =
+                            FontWeight.Bold,
                         fontSize = 16.sp
                     )
 
                     Text(
-                        text = "AI models running locally on your phone.",
+                        "Download once. Use locally afterwards.",
                         color = AbyssMuted,
                         fontSize = 11.sp
                     )
                 }
 
                 Text(
-                    text = "3 READY",
+                    "${installed.size} INSTALLED",
                     color = AbyssBlue,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp
+                    fontSize = 10.sp,
+                    fontWeight =
+                        FontWeight.Bold
                 )
             }
 
-            Spacer(Modifier.height(13.dp))
-
-            ModelRow(
-                icon = Icons.Rounded.Code,
-                name = "Qwen 2.5 Coder",
-                details = "7B  •  4.1 GB"
+            Spacer(
+                Modifier.height(14.dp)
             )
 
-            Spacer(Modifier.height(8.dp))
+            if (installed.isEmpty()) {
 
-            ModelRow(
-                icon = Icons.Rounded.GraphicEq,
-                name = "Whisper",
-                details = "Base  •  0.8 GB"
-            )
+                Text(
+                    "No offline models installed yet.",
+                    color = AbyssMuted,
+                    fontSize = 12.sp
+                )
 
-            Spacer(Modifier.height(8.dp))
+            } else {
 
-            ModelRow(
-                icon = Icons.Rounded.Image,
-                name = "SDXL Turbo",
-                details = "Text-to-Image  •  2.6 GB"
-            )
+                installed
+                    .take(3)
+                    .forEach {
 
-            Spacer(Modifier.height(12.dp))
+                        CompactModelRow(it)
+
+                        Spacer(
+                            Modifier.height(8.dp)
+                        )
+                    }
+            }
 
             OutlinedButton(
-                onClick = {},
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(50),
+                onClick = onManage,
+                modifier =
+                    Modifier.fillMaxWidth(),
+                shape =
+                    RoundedCornerShape(50),
                 border =
-                    androidx.compose.foundation.BorderStroke(
-                        1.dp,
-                        AbyssBlue
-                    )
+                    androidx.compose.foundation
+                        .BorderStroke(
+                            1.dp,
+                            AbyssBlue
+                        )
             ) {
 
                 Icon(
-                    imageVector = Icons.Rounded.Download,
-                    contentDescription = null,
-                    tint = AbyssBlue,
-                    modifier = Modifier.size(18.dp)
+                    Icons.Rounded.Download,
+                    null,
+                    tint = AbyssBlue
                 )
 
-                Spacer(Modifier.width(8.dp))
+                Spacer(
+                    Modifier.width(8.dp)
+                )
 
                 Text(
-                    text = "Manage Models",
+                    "Manage Models",
                     color = AbyssText
                 )
             }
@@ -707,71 +1056,1034 @@ fun ModelsPanel() {
 }
 
 @Composable
-fun ModelRow(
-    icon: ImageVector,
-    name: String,
-    details: String
+private fun CompactModelRow(
+    model: OfflineModel
 ) {
 
     Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = AbyssPanel2,
-        border =
-            androidx.compose.foundation.BorderStroke(
-                1.dp,
-                Color(0xFF18364A)
-            )
+        shape =
+            RoundedCornerShape(14.dp),
+
+        color = AbyssPanel2
     ) {
 
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+
             verticalAlignment =
                 Alignment.CenterVertically
         ) {
 
             Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = AbyssBlue,
-                modifier = Modifier.size(28.dp)
+                if (
+                    model.kind ==
+                    ModelKind.SPEECH
+                )
+                    Icons.Rounded.GraphicEq
+                else
+                    Icons.Rounded.Memory,
+
+                null,
+                tint = AbyssBlue
             )
 
-            Spacer(Modifier.width(12.dp))
+            Spacer(
+                Modifier.width(12.dp)
+            )
 
             Column(
-                modifier = Modifier.weight(1f)
+                Modifier.weight(1f)
             ) {
 
                 Text(
-                    text = name,
+                    model.name,
                     color = AbyssText,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
+                    fontWeight =
+                        FontWeight.SemiBold
                 )
 
                 Text(
-                    text = details,
+                    "${model.quant} • ${model.sizeLabel}",
                     color = AbyssMuted,
                     fontSize = 11.sp
                 )
             }
 
             Box(
-                modifier = Modifier
+                Modifier
                     .size(8.dp)
                     .background(
                         AbyssGreen,
                         CircleShape
                     )
             )
+        }
+    }
+}
 
-            Spacer(Modifier.width(7.dp))
+@Composable
+private fun ModelManagerScreen(
+    manager: OfflineModelManager,
+    onBack: () -> Unit
+) {
+
+    var wifiOnly by remember {
+        mutableStateOf(
+            manager.wifiOnly()
+        )
+    }
+
+    Column(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(
+                    rememberScrollState()
+                )
+                .padding(18.dp)
+    ) {
+
+        ScreenHeader(
+            "Model Manager",
+            "Install, select and remove local AI models.",
+            onBack
+        )
+
+        Spacer(
+            Modifier.height(18.dp)
+        )
+
+        Surface(
+            shape =
+                RoundedCornerShape(16.dp),
+            color = AbyssPanel
+        ) {
+
+            Row(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+
+                verticalAlignment =
+                    Alignment.CenterVertically
+            ) {
+
+                Icon(
+                    Icons.Rounded.Wifi,
+                    null,
+                    tint = AbyssBlue
+                )
+
+                Spacer(
+                    Modifier.width(12.dp)
+                )
+
+                Column(
+                    Modifier.weight(1f)
+                ) {
+
+                    Text(
+                        "Wi-Fi only downloads",
+                        color = AbyssText,
+                        fontWeight =
+                            FontWeight.SemiBold
+                    )
+
+                    Text(
+                        "Recommended for multi-gigabyte models.",
+                        color = AbyssMuted,
+                        fontSize = 11.sp
+                    )
+                }
+
+                Switch(
+                    checked = wifiOnly,
+
+                    onCheckedChange = {
+
+                        wifiOnly = it
+
+                        manager
+                            .setWifiOnly(it)
+                    }
+                )
+            }
+        }
+
+        Spacer(
+            Modifier.height(18.dp)
+        )
+
+        Text(
+            "AVAILABLE MODELS",
+            color = AbyssBlue,
+            fontWeight =
+                FontWeight.Bold,
+            fontSize = 12.sp,
+            letterSpacing = 1.sp
+        )
+
+        Spacer(
+            Modifier.height(10.dp)
+        )
+
+        ModelCatalog.models
+            .forEach { model ->
+
+                ModelCard(
+                    manager,
+                    model
+                )
+
+                Spacer(
+                    Modifier.height(12.dp)
+                )
+            }
+
+        Spacer(
+            Modifier.height(12.dp)
+        )
+
+        Text(
+            "Models are stored in the app's private external-files area. Removing Coder Abyss removes those downloaded files too.",
+            color = AbyssMuted,
+            fontSize = 11.sp
+        )
+
+        Spacer(
+            Modifier.height(30.dp)
+        )
+    }
+}
+
+@Composable
+private fun ModelCard(
+    manager: OfflineModelManager,
+    model: OfflineModel
+) {
+
+    val transfer by
+        produceState(
+            initialValue =
+                manager.state(model),
+            key1 = model.id
+        ) {
+
+            while (true) {
+
+                value =
+                    manager.state(model)
+
+                delay(1000)
+            }
+        }
+
+    var selectedId by remember {
+        mutableStateOf(
+            manager.selectedModelId()
+        )
+    }
+
+    Surface(
+        shape =
+            RoundedCornerShape(18.dp),
+
+        color = AbyssPanel,
+
+        border =
+            androidx.compose.foundation
+                .BorderStroke(
+                    1.dp,
+                    if (
+                        selectedId ==
+                        model.id
+                    )
+                        AbyssGreen
+                    else
+                        Color(0xFF17425A)
+                )
+    ) {
+
+        Column(
+            Modifier.padding(15.dp)
+        ) {
+
+            Row(
+                verticalAlignment =
+                    Alignment.CenterVertically
+            ) {
+
+                Icon(
+                    when (
+                        model.kind
+                    ) {
+
+                        ModelKind.SPEECH ->
+                            Icons.Rounded.GraphicEq
+
+                        ModelKind.IMAGE ->
+                            Icons.Rounded.Image
+
+                        ModelKind.VIDEO ->
+                            Icons.Rounded.Movie
+
+                        else ->
+                            Icons.Rounded.Memory
+                    },
+
+                    null,
+                    tint = AbyssBlue
+                )
+
+                Spacer(
+                    Modifier.width(12.dp)
+                )
+
+                Column(
+                    Modifier.weight(1f)
+                ) {
+
+                    Text(
+                        model.name,
+                        color = AbyssText,
+                        fontWeight =
+                            FontWeight.Bold
+                    )
+
+                    Text(
+                        model.purpose,
+                        color = AbyssMuted,
+                        fontSize = 11.sp
+                    )
+                }
+
+                Text(
+                    model.sizeLabel,
+                    color = AbyssBlue,
+                    fontSize = 11.sp
+                )
+            }
+
+            Spacer(
+                Modifier.height(12.dp)
+            )
 
             Text(
-                text = "Ready",
-                color = AbyssGreen,
+                "${model.family} • ${model.quant}",
+                color = AbyssMuted,
+                fontSize = 11.sp
+            )
+
+            if (
+                transfer.status ==
+                    TransferStatus.DOWNLOADING ||
+                transfer.status ==
+                    TransferStatus.QUEUED ||
+                transfer.status ==
+                    TransferStatus.PAUSED
+            ) {
+
+                Spacer(
+                    Modifier.height(12.dp)
+                )
+
+                LinearProgressIndicator(
+                    progress = {
+                        transfer.progress /
+                            100f
+                    },
+                    modifier =
+                        Modifier.fillMaxWidth()
+                )
+
+                Spacer(
+                    Modifier.height(5.dp)
+                )
+
+                Text(
+                    if (
+                        transfer.status ==
+                        TransferStatus.QUEUED
+                    )
+                        "Queued..."
+                    else
+                        "${transfer.progress}% downloaded",
+
+                    color = AbyssBlue,
+                    fontSize = 11.sp
+                )
+            }
+
+            if (
+                transfer.status ==
+                    TransferStatus.FAILED
+            ) {
+
+                Spacer(
+                    Modifier.height(8.dp)
+                )
+
+                Text(
+                    "Download failed. Tap Retry.",
+                    color = AbyssDanger,
+                    fontSize = 11.sp
+                )
+            }
+
+            Spacer(
+                Modifier.height(12.dp)
+            )
+
+            Row(
+                horizontalArrangement =
+                    Arrangement.spacedBy(8.dp)
+            ) {
+
+                when (
+                    transfer.status
+                ) {
+
+                    TransferStatus.INSTALLED -> {
+
+                        if (
+                            model.kind ==
+                                ModelKind.TEXT
+                        ) {
+
+                            Button(
+                                onClick = {
+
+                                    manager
+                                        .select(model)
+
+                                    selectedId =
+                                        model.id
+                                },
+
+                                modifier =
+                                    Modifier.weight(1f)
+                            ) {
+
+                                Text(
+                                    if (
+                                        selectedId ==
+                                        model.id
+                                    )
+                                        "Selected"
+                                    else
+                                        "Use Model"
+                                )
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+
+                                manager
+                                    .remove(model)
+
+                                selectedId =
+                                    manager
+                                        .selectedModelId()
+                            },
+
+                            modifier =
+                                Modifier.weight(1f)
+                        ) {
+
+                            Text(
+                                "Remove"
+                            )
+                        }
+                    }
+
+                    TransferStatus.DOWNLOADING,
+                    TransferStatus.QUEUED,
+                    TransferStatus.PAUSED -> {
+
+                        OutlinedButton(
+                            onClick = {
+                                manager
+                                    .cancelDownload(
+                                        model
+                                    )
+                            },
+
+                            modifier =
+                                Modifier.fillMaxWidth()
+                        ) {
+
+                            Text(
+                                "Cancel"
+                            )
+                        }
+                    }
+
+                    else -> {
+
+                        Button(
+                            onClick = {
+
+                                manager
+                                    .startDownload(
+                                        model
+                                    )
+                            },
+
+                            modifier =
+                                Modifier.fillMaxWidth()
+                        ) {
+
+                            Icon(
+                                Icons.Rounded.Download,
+                                null
+                            )
+
+                            Spacer(
+                                Modifier.width(8.dp)
+                            )
+
+                            Text(
+                                if (
+                                    transfer.status ==
+                                    TransferStatus.FAILED
+                                )
+                                    "Retry"
+                                else
+                                    "Download"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeatureWorkspace(
+    feature: FeatureType,
+    manager: OfflineModelManager,
+    onBack: () -> Unit,
+    onModels: () -> Unit
+) {
+
+    val selected =
+        manager.selectedTextModel()
+
+    var prompt by remember {
+        mutableStateOf("")
+    }
+
+    Column(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(
+                    rememberScrollState()
+                )
+                .padding(18.dp)
+    ) {
+
+        ScreenHeader(
+            feature.label,
+            feature.description,
+            onBack
+        )
+
+        Spacer(
+            Modifier.height(22.dp)
+        )
+
+        Text(
+            "OFFLINE ENGINE",
+            color = AbyssBlue,
+            fontSize = 12.sp,
+            fontWeight =
+                FontWeight.Bold
+        )
+
+        Spacer(
+            Modifier.height(8.dp)
+        )
+
+        Surface(
+            modifier =
+                Modifier.fillMaxWidth(),
+
+            shape =
+                RoundedCornerShape(18.dp),
+
+            color = AbyssPanel
+        ) {
+
+            Column(
+                Modifier.padding(16.dp)
+            ) {
+
+                Text(
+                    if (selected != null)
+                        selected.name
+                    else
+                        "No text model selected",
+
+                    color = AbyssText,
+                    fontWeight =
+                        FontWeight.Bold
+                )
+
+                Spacer(
+                    Modifier.height(5.dp)
+                )
+
+                Text(
+                    if (selected != null)
+                        "${selected.quant} • ${selected.sizeLabel} • stored locally"
+                    else
+                        "Download and select a local text model.",
+
+                    color = AbyssMuted,
+                    fontSize = 11.sp
+                )
+
+                Spacer(
+                    Modifier.height(12.dp)
+                )
+
+                OutlinedButton(
+                    onClick = onModels
+                ) {
+
+                    Text(
+                        "Choose Offline Model"
+                    )
+                }
+            }
+        }
+
+        Spacer(
+            Modifier.height(20.dp)
+        )
+
+        OutlinedTextField(
+            value = prompt,
+            onValueChange = {
+                prompt = it
+            },
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(190.dp),
+            label = {
+                Text(
+                    when (feature) {
+
+                        FeatureType.APP ->
+                            "Describe the app you want"
+
+                        FeatureType.RESEARCH ->
+                            "Research topic or instructions"
+
+                        FeatureType.VIDEO ->
+                            "Describe the video"
+
+                        FeatureType.VISUALS ->
+                            "Describe the visual"
+                    }
+                )
+            }
+        )
+
+        Spacer(
+            Modifier.height(16.dp)
+        )
+
+        Button(
+            onClick = onModels,
+            enabled =
+                selected == null,
+            modifier =
+                Modifier.fillMaxWidth()
+        ) {
+
+            Text(
+                if (selected == null)
+                    "Install / Select Model"
+                else
+                    "Offline model ready"
+            )
+        }
+
+        if (selected != null) {
+
+            Spacer(
+                Modifier.height(14.dp)
+            )
+
+            Surface(
+                shape =
+                    RoundedCornerShape(14.dp),
+                color =
+                    Color(0xFF072638)
+            ) {
+
+                Text(
+                    "The model-management layer is now real. The next native build connects this selected GGUF directly to llama.cpp so Generate runs completely offline.",
+                    modifier =
+                        Modifier.padding(14.dp),
+                    color =
+                        Color(0xFFB9E8F5),
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        Spacer(
+            Modifier.height(30.dp)
+        )
+    }
+}
+
+@Composable
+private fun LibraryScreen(
+    manager: OfflineModelManager
+) {
+
+    val models =
+        manager.installedModels()
+
+    Column(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(
+                    rememberScrollState()
+                )
+                .padding(18.dp)
+    ) {
+
+        Text(
+            "Library",
+            color = AbyssText,
+            fontSize = 27.sp,
+            fontWeight =
+                FontWeight.Bold
+        )
+
+        Text(
+            "Your downloaded local AI assets.",
+            color = AbyssMuted
+        )
+
+        Spacer(
+            Modifier.height(22.dp)
+        )
+
+        if (models.isEmpty()) {
+
+            Text(
+                "Your offline library is empty.",
+                color = AbyssMuted
+            )
+
+        } else {
+
+            models.forEach {
+
+                CompactModelRow(it)
+
+                Spacer(
+                    Modifier.height(10.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    manager: OfflineModelManager
+) {
+
+    var wifiOnly by remember {
+        mutableStateOf(
+            manager.wifiOnly()
+        )
+    }
+
+    Column(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(
+                    rememberScrollState()
+                )
+                .padding(18.dp)
+    ) {
+
+        Text(
+            "Settings",
+            color = AbyssText,
+            fontSize = 27.sp,
+            fontWeight =
+                FontWeight.Bold
+        )
+
+        Spacer(
+            Modifier.height(20.dp)
+        )
+
+        SettingCard(
+            icon =
+                Icons.Rounded.Security,
+            title =
+                "Local First",
+            subtitle =
+                "Downloaded models and projects stay on this device."
+        )
+
+        Spacer(
+            Modifier.height(12.dp)
+        )
+
+        Surface(
+            shape =
+                RoundedCornerShape(16.dp),
+            color = AbyssPanel
+        ) {
+
+            Row(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(15.dp),
+
+                verticalAlignment =
+                    Alignment.CenterVertically
+            ) {
+
+                Icon(
+                    Icons.Rounded.Wifi,
+                    null,
+                    tint = AbyssBlue
+                )
+
+                Spacer(
+                    Modifier.width(12.dp)
+                )
+
+                Column(
+                    Modifier.weight(1f)
+                ) {
+
+                    Text(
+                        "Wi-Fi only model downloads",
+                        color = AbyssText
+                    )
+
+                    Text(
+                        "Avoid large model downloads over mobile data.",
+                        color = AbyssMuted,
+                        fontSize = 11.sp
+                    )
+                }
+
+                Switch(
+                    checked = wifiOnly,
+
+                    onCheckedChange = {
+
+                        wifiOnly = it
+
+                        manager
+                            .setWifiOnly(it)
+                    }
+                )
+            }
+        }
+
+        Spacer(
+            Modifier.height(12.dp)
+        )
+
+        SettingCard(
+            icon =
+                Icons.Rounded.CloudOff,
+            title =
+                "Online APIs",
+            subtitle =
+                "Disabled for now. GPT, Claude and other API providers can be added later without replacing local mode."
+        )
+
+        Spacer(
+            Modifier.height(20.dp)
+        )
+
+        Text(
+            "Model folder",
+            color = AbyssBlue,
+            fontWeight =
+                FontWeight.Bold
+        )
+
+        Spacer(
+            Modifier.height(5.dp)
+        )
+
+        Text(
+            manager
+                .modelDirectory
+                .absolutePath,
+            color = AbyssMuted,
+            fontSize = 11.sp
+        )
+    }
+}
+
+@Composable
+private fun SettingCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String
+) {
+
+    Surface(
+        modifier =
+            Modifier.fillMaxWidth(),
+        shape =
+            RoundedCornerShape(16.dp),
+        color = AbyssPanel
+    ) {
+
+        Row(
+            Modifier.padding(15.dp)
+        ) {
+
+            Icon(
+                icon,
+                null,
+                tint = AbyssBlue
+            )
+
+            Spacer(
+                Modifier.width(12.dp)
+            )
+
+            Column {
+
+                Text(
+                    title,
+                    color = AbyssText,
+                    fontWeight =
+                        FontWeight.SemiBold
+                )
+
+                Text(
+                    subtitle,
+                    color = AbyssMuted,
+                    fontSize = 11.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalFirstPanel() {
+
+    Surface(
+        modifier =
+            Modifier.fillMaxWidth(),
+
+        shape =
+            RoundedCornerShape(17.dp),
+
+        color = AbyssPanel
+    ) {
+
+        Row(
+            modifier =
+                Modifier.padding(15.dp),
+
+            verticalAlignment =
+                Alignment.CenterVertically
+        ) {
+
+            Icon(
+                Icons.Rounded.Lock,
+                null,
+                tint = AbyssBlue,
+                modifier =
+                    Modifier.size(27.dp)
+            )
+
+            Spacer(
+                Modifier.width(12.dp)
+            )
+
+            Column {
+
+                Text(
+                    "Local First",
+                    color = AbyssText,
+                    fontWeight =
+                        FontWeight.SemiBold
+                )
+
+                Text(
+                    "Internet is needed for model downloads only. Local inference is the primary design.",
+                    color = AbyssMuted,
+                    fontSize = 11.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScreenHeader(
+    title: String,
+    subtitle: String,
+    onBack: () -> Unit
+) {
+
+    Row(
+        verticalAlignment =
+            Alignment.CenterVertically
+    ) {
+
+        IconButton(
+            onClick = onBack
+        ) {
+
+            Icon(
+                Icons.Rounded.ArrowBack,
+                "Back",
+                tint = AbyssBlue
+            )
+        }
+
+        Spacer(
+            Modifier.width(5.dp)
+        )
+
+        Column {
+
+            Text(
+                title,
+                color = AbyssText,
+                fontSize = 24.sp,
+                fontWeight =
+                    FontWeight.Bold
+            )
+
+            Text(
+                subtitle,
+                color = AbyssMuted,
                 fontSize = 11.sp
             )
         }
@@ -779,128 +2091,100 @@ fun ModelRow(
 }
 
 @Composable
-fun InternetPanel() {
-
-    var enabled by remember {
-        mutableStateOf(false)
-    }
-
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(17.dp),
-        color = AbyssPanel,
-        border =
-            androidx.compose.foundation.BorderStroke(
-                1.dp,
-                Color(0xFF153B50)
-            )
-    ) {
-
-        Row(
-            modifier = Modifier.padding(15.dp),
-            verticalAlignment =
-                Alignment.CenterVertically
-        ) {
-
-            Icon(
-                imageVector = Icons.Rounded.Language,
-                contentDescription = null,
-                tint = AbyssBlue,
-                modifier = Modifier.size(27.dp)
-            )
-
-            Spacer(Modifier.width(12.dp))
-
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-
-                Text(
-                    text = "Internet-Enhanced Mode",
-                    color = AbyssText,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                Text(
-                    text = "Access online services only when allowed.",
-                    color = AbyssMuted,
-                    fontSize = 11.sp
-                )
-            }
-
-            Switch(
-                checked = enabled,
-                onCheckedChange = {
-                    enabled = it
-                }
-            )
-        }
-    }
-}
-
-@Composable
-fun AbyssBottomBar(
+private fun AbyssBottomBar(
     selected: Int,
-    onSelected: (Int) -> Unit
+    onSelected:
+        (Int) -> Unit
 ) {
 
-    val items = listOf(
-        Pair("Home", Icons.Rounded.Home),
-        Pair("Projects", Icons.Rounded.Folder),
-        Pair("Library", Icons.Rounded.Description),
-        Pair("Settings", Icons.Rounded.Settings)
-    )
+    val items =
+        listOf(
+            "Home" to
+                Icons.Rounded.Home,
+
+            "Projects" to
+                Icons.Rounded.Folder,
+
+            "Library" to
+                Icons.Rounded.Description,
+
+            "Settings" to
+                Icons.Rounded.Settings
+        )
 
     NavigationBar(
-        containerColor = Color(0xFF020A10)
+        containerColor =
+            Color(0xFF020A10)
     ) {
 
-        items.forEachIndexed {
-                index,
-                item ->
+        items
+            .forEachIndexed {
+                    index,
+                    item ->
 
-            NavigationBarItem(
-                selected = selected == index,
-                onClick = {
-                    onSelected(index)
-                },
-                icon = {
+                NavigationBarItem(
+                    selected =
+                        selected ==
+                            index,
 
-                    Icon(
-                        imageVector = item.second,
-                        contentDescription = item.first
-                    )
-                },
-                label = {
+                    onClick = {
+                        onSelected(
+                            index
+                        )
+                    },
 
-                    Text(
-                        text = item.first,
-                        fontSize = 10.sp
-                    )
-                },
-                colors =
-                    NavigationBarItemDefaults.colors(
-                        selectedIconColor = AbyssBlue,
-                        selectedTextColor = AbyssBlue,
-                        unselectedIconColor = AbyssMuted,
-                        unselectedTextColor = AbyssMuted,
-                        indicatorColor =
-                            Color(0xFF062538)
-                    )
-            )
-        }
+                    icon = {
+
+                        Icon(
+                            item.second,
+                            item.first
+                        )
+                    },
+
+                    label = {
+
+                        Text(
+                            item.first,
+                            fontSize = 10.sp
+                        )
+                    },
+
+                    colors =
+                        NavigationBarItemDefaults
+                            .colors(
+                                selectedIconColor =
+                                    AbyssBlue,
+
+                                selectedTextColor =
+                                    AbyssBlue,
+
+                                unselectedIconColor =
+                                    AbyssMuted,
+
+                                unselectedTextColor =
+                                    AbyssMuted,
+
+                                indicatorColor =
+                                    Color(
+                                        0xFF062538
+                                    )
+                            )
+                )
+            }
     }
 }
 
 @Composable
-fun PlaceholderScreen(
+private fun PlaceholderScreen(
     title: String,
-    icon: ImageVector
+    icon: ImageVector,
+    subtitle: String
 ) {
 
     Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+        Modifier.fillMaxSize(),
+        contentAlignment =
+            Alignment.Center
     ) {
 
         Column(
@@ -909,26 +2193,38 @@ fun PlaceholderScreen(
         ) {
 
             Icon(
-                imageVector = icon,
-                contentDescription = null,
+                icon,
+                null,
                 tint = AbyssBlue,
-                modifier = Modifier.size(60.dp)
+                modifier =
+                    Modifier.size(60.dp)
             )
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(
+                Modifier.height(14.dp)
+            )
 
             Text(
-                text = title,
+                title,
                 color = AbyssText,
                 fontSize = 24.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight =
+                    FontWeight.Bold
             )
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(
+                Modifier.height(8.dp)
+            )
 
             Text(
-                text = "Coder Abyss",
-                color = AbyssMuted
+                subtitle,
+                color = AbyssMuted,
+                textAlign =
+                    TextAlign.Center,
+                modifier =
+                    Modifier.padding(
+                        horizontal = 30.dp
+                    )
             )
         }
     }
