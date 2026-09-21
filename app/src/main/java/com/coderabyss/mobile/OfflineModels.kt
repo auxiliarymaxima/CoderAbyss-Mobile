@@ -1,5 +1,8 @@
 package com.coderabyss.mobile
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+
 import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
@@ -171,11 +174,32 @@ class OfflineModelManager(context: Context) {
                     isInstalled(it)
         }
 
-    fun selectedModelId(): String? =
-        prefs.getString(
-            "selected_text_model",
-            null
-        )
+    var selectedId by androidx.compose.runtime.mutableStateOf(prefs.getString("selected_text_model", null))
+        private set
+
+    fun selectedModelId(): String? = selectedId
+
+    fun workflowModel(workflow: String): OfflineModel? {
+        val key = "workflow_model_$workflow"
+        val id = prefs.getString(key, null) ?: selectedModelId()?.also {
+            prefs.edit().putString(key, it).apply()
+        }
+        return installedTextModels().firstOrNull { it.id == id }
+    }
+
+    fun videoModelId(): String {
+        val key = "workflow_model_VIDEO"
+        return prefs.getString(key, null) ?: WanVideoClient.MODEL_ID.also {
+            prefs.edit().putString(key, it).apply()
+        }
+    }
+
+    fun selectForWorkflow(workflow: String, model: OfflineModel) {
+        if (model.kind == ModelKind.TEXT && isInstalled(model)) {
+            prefs.edit().putString("workflow_model_$workflow", model.id).apply()
+        }
+    }
+
 
     fun selectedTextModel(): OfflineModel? {
 
@@ -204,6 +228,7 @@ class OfflineModelManager(context: Context) {
             )
             .apply()
 
+        selectedId = model.id
         return true
     }
 
@@ -311,6 +336,7 @@ class OfflineModelManager(context: Context) {
         if (
             selectedModelId() == model.id
         ) {
+            selectedId = null
             prefs.edit()
                 .remove(
                     "selected_text_model"

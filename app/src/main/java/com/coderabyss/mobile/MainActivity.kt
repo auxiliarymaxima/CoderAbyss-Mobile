@@ -74,7 +74,7 @@ private enum class FeatureType(
 
     VIDEO(
         "Create video",
-        "Prepare scripts, scenes and prompts locally. Video model runtime comes next."
+        "Generate video with Wan through Hugging Face Inference Providers."
     ),
 
     RESEARCH(
@@ -323,6 +323,10 @@ private fun HomeScreen(
             modelManager.isInstalled(it)
         }
 
+    DisposableEffect(whisperEngine) {
+        onDispose { whisperEngine.stopRecording() }
+    }
+
     val installedCount =
         modelManager.installedModels().size
 
@@ -359,6 +363,10 @@ private fun HomeScreen(
             onClick = {
 
                 voiceError = null
+
+                if (transcribing) {
+                    return@MicrophoneButton
+                }
 
                 if (whisperModel == null) {
 
@@ -1366,11 +1374,7 @@ private fun ModelCard(
             }
         }
 
-    var selectedId by remember {
-        mutableStateOf(
-            manager.selectedModelId()
-        )
-    }
+    val selectedId = manager.selectedId
 
     Surface(
         shape =
@@ -1541,11 +1545,7 @@ private fun ModelCard(
                             Button(
                                 onClick = {
 
-                                    manager
-                                        .select(model)
-
-                                    selectedId =
-                                        model.id
+                                    manager.select(model)
                                 },
 
                                 modifier =
@@ -1567,12 +1567,7 @@ private fun ModelCard(
                         OutlinedButton(
                             onClick = {
 
-                                manager
-                                    .remove(model)
-
-                                selectedId =
-                                    manager
-                                        .selectedModelId()
+                                manager.remove(model)
                             },
 
                             modifier =
@@ -1660,7 +1655,9 @@ private fun FeatureWorkspace(
     if (feature == FeatureType.VIDEO) {
 
         WanVideoWorkspace(
-            onBack = onBack
+            onBack = onBack,
+            manager = manager,
+            onModels = onModels
         )
 
         return
@@ -1679,8 +1676,28 @@ private fun FeatureWorkspace(
             )
         }
 
-    val selected =
-        manager.selectedTextModel()
+    var selected by remember(feature) { mutableStateOf(manager.workflowModel(feature.name)) }
+    var choosingModel by remember { mutableStateOf(false) }
+    if (choosingModel) {
+        AlertDialog(
+            onDismissRequest = { choosingModel = false },
+            title = { Text("Default model for ${feature.label}") },
+            text = {
+                Column {
+                    manager.installedTextModels().forEach { model ->
+                        TextButton(onClick = {
+                            manager.selectForWorkflow(feature.name, model)
+                            selected = model
+                            choosingModel = false
+                        }) { Text(model.name) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosingModel = false; onModels() }) { Text("Manage downloads") } }
+        )
+    }
+
+    var voiceBusy by remember { mutableStateOf(false) }
 
     var prompt by remember {
         mutableStateOf("")
@@ -1801,8 +1818,8 @@ private fun FeatureWorkspace(
                 )
 
                 OutlinedButton(
-                    onClick =
-                        onModels
+                    enabled = !running,
+                    onClick = { choosingModel = true }
                 ) {
 
                     Text(
@@ -1815,6 +1832,10 @@ private fun FeatureWorkspace(
         Spacer(
             Modifier.height(18.dp)
         )
+
+        PromptVoiceInput(manager, onModels, enabled = !running, onBusy = { voiceBusy = it }) { text ->
+            prompt = listOf(prompt, text).filter { it.isNotBlank() }.joinToString("\n")
+        }
 
         OutlinedTextField(
             value = prompt,
@@ -1851,6 +1872,7 @@ private fun FeatureWorkspace(
         if (!running) {
 
             Button(
+                enabled = !voiceBusy,
                 onClick = {
 
                     if (selected == null) {
@@ -1873,6 +1895,7 @@ private fun FeatureWorkspace(
 
                             try {
 
+                                manager.select(selected)
                                 engine.generate(
                                     modelPath =
                                         manager
@@ -2043,6 +2066,8 @@ private fun FeatureWorkspace(
 
 @Composable
 private fun WanVideoWorkspace(
+    manager: OfflineModelManager,
+    onModels: () -> Unit,
     onBack: () -> Unit
 ) {
 
@@ -2058,6 +2083,8 @@ private fun WanVideoWorkspace(
                 context.applicationContext
             )
         }
+
+    var voiceBusy by remember { mutableStateOf(false) }
 
     var prompt by remember {
         mutableStateOf("")
@@ -2115,7 +2142,7 @@ private fun WanVideoWorkspace(
             ) {
 
                 Text(
-                    "Wan-AI / Wan2.1 T2V 1.3B",
+                    manager.videoModelId(),
                     color =
                         AbyssText,
                     fontWeight =
@@ -2158,6 +2185,10 @@ private fun WanVideoWorkspace(
             Modifier.height(14.dp)
         )
 
+        PromptVoiceInput(manager, onModels, enabled = !generating, onBusy = { voiceBusy = it }) { text ->
+            prompt = listOf(prompt, text).filter { it.isNotBlank() }.joinToString("\n")
+        }
+
         OutlinedTextField(
             value = prompt,
             onValueChange = {
@@ -2180,7 +2211,7 @@ private fun WanVideoWorkspace(
 
         Button(
             enabled =
-                !generating &&
+                !generating && !voiceBusy &&
                 hfToken.isNotBlank() &&
                 prompt.isNotBlank(),
             onClick = {
@@ -2814,4 +2845,77 @@ private fun PlaceholderScreen(
             )
         }
     }
+}
+
+/** Dictation only edits the prompt; submission is always a separate user action. */
+@Composable
+private fun PromptVoiceInput(
+    manager: OfflineModelManager,
+    onModels: () -> Unit,
+    enabled: Boolean,
+    onBusy: (Boolean) -> Unit,
+    onTranscript: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val engine = remember { WhisperVoiceEngine() }
+    val insert by rememberUpdatedState(onTranscript)
+    val busy by rememberUpdatedState(onBusy)
+    var recording by remember { mutableStateOf(false) }
+    var transcribing by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) error = "Microphone permission is required for Tap to Speak."
+    }
+    LaunchedEffect(recording, transcribing) { busy(recording || transcribing) }
+    DisposableEffect(engine) {
+        onDispose { engine.stopRecording() }
+    }
+    OutlinedButton(
+        enabled = enabled && !transcribing,
+        onClick = {
+            error = null
+            val model = manager.installedModels().firstOrNull { it.kind == ModelKind.SPEECH }
+            if (recording) {
+                recording = false
+                val audio = engine.stopRecording()
+                transcribing = true
+                scope.launch {
+                    try {
+                        checkNotNull(model) { "Install Whisper in Model Manager first." }
+                        val text = engine.transcribe(manager.modelFile(model), audio)
+                        if (text.isBlank()) error = "No speech recognized. Try again."
+                        else insert(text)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        error = e.message ?: "Whisper transcription failed."
+                    } finally {
+                        transcribing = false
+                    }
+                }
+            } else if (model == null) {
+                onModels()
+            } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                permission.launch(Manifest.permission.RECORD_AUDIO)
+            } else {
+                try {
+                    recording = engine.startRecording()
+                    if (!recording) error = "Could not start microphone."
+                } catch (e: Exception) {
+                    engine.stopRecording()
+                    error = e.message ?: "Could not start microphone."
+                }
+            }
+        }
+    ) {
+        Icon(Icons.Rounded.Mic, contentDescription = null)
+        Text(when {
+            recording -> "Listening — tap to stop"
+            transcribing -> "Whisper is transcribing…"
+            else -> "Tap to Speak"
+        })
+    }
+    Text("Dictation is added below. Edit your prompt before submitting.", color = AbyssMuted, fontSize = 12.sp)
+    error?.let { Text(it, color = AbyssDanger) }
 }

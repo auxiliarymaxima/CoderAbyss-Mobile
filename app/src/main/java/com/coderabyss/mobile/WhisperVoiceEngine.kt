@@ -30,12 +30,6 @@ class WhisperVoiceEngine {
     private var audioBytes =
         ByteArrayOutputStream()
 
-    private var context:
-        WhisperContext? = null
-
-    private var modelPath:
-        String? = null
-
     @SuppressLint("MissingPermission")
     fun startRecording(): Boolean {
 
@@ -203,29 +197,12 @@ class WhisperVoiceEngine {
             Dispatchers.IO
         ) {
 
-            if (
-                modelPath !=
-                model.absolutePath
-            ) {
-
-                context?.release()
-
-                context =
-                    WhisperContext
-                        .createContextFromFile(
-                            model.absolutePath
-                        )
-
-                modelPath =
-                    model.absolutePath
+            val whisper = WhisperContext.createContextFromFile(model.absolutePath)
+            try {
+                whisper.transcribeData(audio, printTimestamp = false).trim()
+            } finally {
+                withContext(kotlinx.coroutines.NonCancellable) { whisper.release() }
             }
-
-            context!!
-                .transcribeData(
-                    audio,
-                    printTimestamp = false
-                )
-                .trim()
         }
     }
 }

@@ -19,6 +19,10 @@ class WanVideoClient(
     private val context: Context
 ) {
 
+    companion object {
+        const val MODEL_ID = "Wan-AI/Wan2.1-T2V-1.3B"
+    }
+
     private val client =
         OkHttpClient.Builder()
             .connectTimeout(

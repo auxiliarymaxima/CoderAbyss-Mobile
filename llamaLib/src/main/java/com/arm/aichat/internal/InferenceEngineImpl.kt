@@ -3,7 +3,6 @@ package com.arm.aichat.internal
 import android.content.Context
 import android.util.Log
 import com.arm.aichat.InferenceEngine
-import com.arm.aichat.UnsupportedArchitectureException
 import com.arm.aichat.internal.InferenceEngineImpl.Companion.getInstance
 import dalvik.annotation.optimization.FastNative
 import kotlinx.coroutines.CancellationException
@@ -62,6 +61,7 @@ internal class InferenceEngineImpl private constructor(
          */
         internal fun getInstance(context: Context) =
             instance ?: synchronized(this) {
+                instance?.let { return@synchronized it }
                 val nativeLibDir = context.applicationInfo.nativeLibraryDir
                 require(nativeLibDir.isNotBlank()) { "Expected a valid native library path!" }
 
@@ -113,6 +113,7 @@ internal class InferenceEngineImpl private constructor(
         MutableStateFlow<InferenceEngine.State>(InferenceEngine.State.Uninitialized)
     override val state: StateFlow<InferenceEngine.State> = _state.asStateFlow()
 
+    private var nativeInitialized = false
     private var _readyForSystemPrompt = false
     @Volatile
     private var _cancelGeneration = false
@@ -134,12 +135,14 @@ internal class InferenceEngineImpl private constructor(
                 Log.i(TAG, "Loading native library...")
                 System.loadLibrary("ai-chat")
                 init(nativeLibDir)
+                nativeInitialized = true
                 _state.value = InferenceEngine.State.Initialized
                 Log.i(TAG, "Native library loaded! System info: \n${systemInfo()}")
 
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to load native library", e)
-                throw e
+            } catch (e: Throwable) {
+                val failure = IOException("llama.cpp initialization failed: ${e.message}. Check the installed APK ABI and native libraries.", e)
+                Log.e(TAG, failure.message, e)
+                _state.value = InferenceEngine.State.Error(failure)
             }
         }
     }
@@ -165,11 +168,10 @@ internal class InferenceEngineImpl private constructor(
                 _readyForSystemPrompt = false
                 _state.value = InferenceEngine.State.LoadingModel
                 load(pathToModel).let {
-                    // TODO-han.yin: find a better way to pass other error codes
-                    if (it != 0) throw UnsupportedArchitectureException()
+                    if (it != 0) throw IOException("llama.cpp could not load ${File(pathToModel).name} (code $it). Check that the GGUF download is complete and supported, or try a smaller model to reduce RAM usage.")
                 }
                 prepare().let {
-                    if (it != 0) throw IOException("Failed to prepare resources")
+                    if (it != 0) throw IOException("llama.cpp could not allocate context/sampler resources (code $it). Try a smaller model or free device memory.")
                 }
                 Log.i(TAG, "Model loaded!")
                 _readyForSystemPrompt = true
@@ -231,7 +233,7 @@ internal class InferenceEngineImpl private constructor(
             processUserPrompt(message, predictLength).let { result ->
                 if (result != 0) {
                     Log.e(TAG, "Failed to process user prompt: $result")
-                    return@flow
+                    throw IOException("llama.cpp prompt processing failed (code $result). Shorten the prompt or try another GGUF model.")
                 }
             }
 
@@ -295,7 +297,10 @@ internal class InferenceEngineImpl private constructor(
                 }
 
                 is InferenceEngine.State.Error -> {
+                    check(nativeInitialized) { state.exception.message ?: "llama.cpp initialization failed. Reinstall a compatible APK." }
                     Log.i(TAG, "Resetting error states...")
+                    unload()
+                    _readyForSystemPrompt = false
                     _state.value = InferenceEngine.State.Initialized
                     Log.i(TAG, "States reset!")
                     Unit

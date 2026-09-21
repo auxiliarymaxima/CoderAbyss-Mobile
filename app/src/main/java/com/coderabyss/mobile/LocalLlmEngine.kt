@@ -4,38 +4,19 @@ import android.content.Context
 import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.isModelLoaded
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
-class LocalLlmEngine(
-    context: Context
-) {
+class LocalLlmEngine(context: Context) {
+    private val engine = AiChat.getInferenceEngine(context.applicationContext)
 
-    private val engine =
-        AiChat.getInferenceEngine(
-            context.applicationContext
-        )
-
-    private val mutex =
-        Mutex()
-
-    private var loadedModel: String? = null
-    private var loadedSystemPrompt: String? = null
-
-    private suspend fun waitUntilInitialized() {
-
-        val state =
-            engine.state.first {
-                it is InferenceEngine.State.Initialized ||
-                it is InferenceEngine.State.ModelReady ||
-                it is InferenceEngine.State.Error
-            }
-
-        if (state is InferenceEngine.State.Error) {
-            throw state.exception
-        }
+    companion object {
+        // Every workflow wraps the same native engine. Hold this through cleanup.
+        private val mutex = Mutex()
     }
 
     suspend fun generate(
@@ -45,57 +26,26 @@ class LocalLlmEngine(
         maxTokens: Int = 768,
         onToken: (String) -> Unit
     ) {
-
         mutex.withLock {
-
-            waitUntilInitialized()
-
-            val state =
-                engine.state.value
-
-            val reload =
-                loadedModel != modelPath ||
-                loadedSystemPrompt != systemPrompt ||
-                !state.isModelLoaded
-
-            if (reload) {
-
-                if (
-                    engine.state.value
-                        .isModelLoaded
-                ) {
-                    engine.cleanUp()
-                }
-
-                if (
-                    engine.state.value
-                    is InferenceEngine.State.Error
-                ) {
-                    engine.cleanUp()
-                }
-
-                waitUntilInitialized()
-
-                engine.loadModel(
-                    modelPath
-                )
-
-                engine.setSystemPrompt(
-                    systemPrompt
-                )
-
-                loadedModel =
-                    modelPath
-
-                loadedSystemPrompt =
-                    systemPrompt
+            engine.state.first {
+                it is InferenceEngine.State.Initialized ||
+                    it is InferenceEngine.State.ModelReady ||
+                    it is InferenceEngine.State.Error
             }
-
-            engine.sendUserPrompt(
-                prompt,
-                maxTokens
-            ).collect {
-                onToken(it)
+            if (engine.state.value.isModelLoaded || engine.state.value is InferenceEngine.State.Error) {
+                withContext(Dispatchers.IO) { engine.cleanUp() }
+            }
+            try {
+                engine.loadModel(modelPath)
+                engine.setSystemPrompt(systemPrompt)
+                engine.sendUserPrompt(prompt, maxTokens).collect { onToken(it) }
+            } finally {
+                // Free native memory on success, failure, navigation and cancellation.
+                withContext(NonCancellable + Dispatchers.IO) {
+                    if (engine.state.value.isModelLoaded || engine.state.value is InferenceEngine.State.Error) {
+                        engine.cleanUp()
+                    }
+                }
             }
         }
     }
