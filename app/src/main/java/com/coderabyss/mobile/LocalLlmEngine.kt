@@ -6,6 +6,7 @@ import com.arm.aichat.InferenceEngine
 import com.arm.aichat.isModelLoaded
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock

@@ -1875,7 +1875,8 @@ private fun FeatureWorkspace(
                 enabled = !voiceBusy,
                 onClick = {
 
-                    if (selected == null) {
+                    val requestModel = selected
+                    if (requestModel == null) {
                         onModels()
                         return@Button
                     }
@@ -1895,12 +1896,12 @@ private fun FeatureWorkspace(
 
                             try {
 
-                                manager.select(selected)
+                                manager.select(requestModel)
                                 engine.generate(
                                     modelPath =
                                         manager
                                             .modelFile(
-                                                selected
+                                                requestModel
                                             )
                                             .absolutePath,
                                     systemPrompt =
@@ -1954,7 +1955,6 @@ private fun FeatureWorkspace(
                 onClick = {
 
                     generationJob?.cancel()
-                    running = false
                 },
                 modifier =
                     Modifier.fillMaxWidth()
