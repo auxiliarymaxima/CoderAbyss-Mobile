@@ -1,6 +1,7 @@
 package com.coderabyss.mobile
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
@@ -36,8 +37,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val AbyssBlack = Color(0xFF020810)
 private val AbyssPanel = Color(0xFF061522)
@@ -256,60 +260,71 @@ private fun CoderAbyssApp() {
                 AppPage.SETTINGS ->
 
                     SettingsScreen(
-                        modelManager
+                        manager = modelManager,
+                        onModels = {
+                            page = AppPage.MODELS
+                        }
                     )
             }
         }
     }
 }
 
+
 @Composable
 private fun HomeScreen(
     modelManager: OfflineModelManager,
     onModels: () -> Unit,
-    onFeature:
-        (FeatureType) -> Unit
+    onFeature: (FeatureType) -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
-    val context =
-        LocalContext.current
+    val whisperEngine =
+        remember {
+            WhisperVoiceEngine()
+        }
+
+    var recording by remember {
+        mutableStateOf(false)
+    }
+
+    var transcribing by remember {
+        mutableStateOf(false)
+    }
+
+    var transcript by remember {
+        mutableStateOf("")
+    }
+
+    var voiceError by remember {
+        mutableStateOf<String?>(null)
+    }
 
     var microphoneGranted by remember {
         mutableStateOf(
-            ContextCompat
-                .checkSelfPermission(
-                    context,
-                    Manifest.permission
-                        .RECORD_AUDIO
-                ) ==
-                    PackageManager
-                        .PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
         )
     }
 
     val microphoneLauncher =
         rememberLauncherForActivityResult(
-            ActivityResultContracts
-                .RequestPermission()
+            ActivityResultContracts.RequestPermission()
         ) { granted ->
-
-            microphoneGranted =
-                granted
+            microphoneGranted = granted
         }
 
-    val whisperInstalled =
-        ModelCatalog.models.any {
-
-            it.kind ==
-                ModelKind.SPEECH &&
-                    modelManager
-                        .isInstalled(it)
+    val whisperModel =
+        ModelCatalog.models.firstOrNull {
+            it.kind == ModelKind.SPEECH &&
+            modelManager.isInstalled(it)
         }
 
     val installedCount =
-        modelManager
-            .installedModels()
-            .size
+        modelManager.installedModels().size
 
     Column(
         modifier =
@@ -318,14 +333,11 @@ private fun HomeScreen(
                 .verticalScroll(
                     rememberScrollState()
                 )
-                .padding(
-                    horizontal = 18.dp
-                )
+                .padding(horizontal = 18.dp)
                 .padding(
                     top = 18.dp,
                     bottom = 28.dp
                 ),
-
         horizontalAlignment =
             Alignment.CenterHorizontally
     ) {
@@ -343,37 +355,66 @@ private fun HomeScreen(
         )
 
         MicrophoneButton(
-            ready =
-                whisperInstalled,
-
+            ready = whisperModel != null,
             onClick = {
 
-                if (!whisperInstalled) {
+                voiceError = null
 
-                    Toast.makeText(
-                        context,
-                        "Download a Whisper model first.",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                if (whisperModel == null) {
 
                     onModels()
 
-                } else if (
-                    !microphoneGranted
-                ) {
+                } else if (!microphoneGranted) {
 
                     microphoneLauncher.launch(
-                        Manifest.permission
-                            .RECORD_AUDIO
+                        Manifest.permission.RECORD_AUDIO
                     )
+
+                } else if (!recording) {
+
+                    if (
+                        whisperEngine.startRecording()
+                    ) {
+                        recording = true
+                        transcript = ""
+                    } else {
+                        voiceError =
+                            "Could not start microphone."
+                    }
 
                 } else {
 
-                    Toast.makeText(
-                        context,
-                        "Whisper model is installed. Native transcription engine is the next integration.",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    recording = false
+                    transcribing = true
+
+                    val audio =
+                        whisperEngine.stopRecording()
+
+                    scope.launch {
+
+                        try {
+
+                            transcript =
+                                whisperEngine.transcribe(
+                                    modelManager
+                                        .modelFile(
+                                            whisperModel
+                                        ),
+                                    audio
+                                )
+
+                        } catch (e: Exception) {
+
+                            voiceError =
+                                e.message
+                                    ?: "Whisper transcription failed."
+
+                        } finally {
+
+                            transcribing =
+                                false
+                        }
+                    }
                 }
             }
         )
@@ -384,11 +425,19 @@ private fun HomeScreen(
 
         Text(
             text =
-                if (whisperInstalled)
-                    "Whisper model ready"
-                else
-                    "Tap to install Whisper",
+                when {
+                    recording ->
+                        "Listening — tap to stop"
 
+                    transcribing ->
+                        "Whisper is transcribing..."
+
+                    whisperModel != null ->
+                        "Tap to speak"
+
+                    else ->
+                        "Install Whisper"
+                },
             color = AbyssText,
             fontWeight =
                 FontWeight.SemiBold,
@@ -400,14 +449,52 @@ private fun HomeScreen(
         )
 
         StatusPill(
-            text =
-                "$installedCount offline model" +
-                    if (installedCount == 1)
-                        ""
-                    else
-                        "s" +
-                            " installed"
+            "$installedCount offline model" +
+                if (installedCount == 1)
+                    " installed"
+                else
+                    "s installed"
         )
+
+        if (
+            transcript.isNotBlank()
+        ) {
+
+            Spacer(
+                Modifier.height(14.dp)
+            )
+
+            Surface(
+                modifier =
+                    Modifier.fillMaxWidth(),
+                shape =
+                    RoundedCornerShape(16.dp),
+                color =
+                    AbyssPanel
+            ) {
+
+                Text(
+                    transcript,
+                    modifier =
+                        Modifier.padding(15.dp),
+                    color =
+                        AbyssText
+                )
+            }
+        }
+
+        voiceError?.let {
+
+            Spacer(
+                Modifier.height(10.dp)
+            )
+
+            Text(
+                it,
+                color = AbyssDanger,
+                fontSize = 12.sp
+            )
+        }
 
         Spacer(
             Modifier.height(28.dp)
@@ -422,11 +509,8 @@ private fun HomeScreen(
         )
 
         ModelsPanel(
-            manager =
-                modelManager,
-
-            onManage =
-                onModels
+            manager = modelManager,
+            onManage = onModels
         )
 
         Spacer(
@@ -1564,6 +1648,7 @@ private fun ModelCard(
     }
 }
 
+
 @Composable
 private fun FeatureWorkspace(
     feature: FeatureType,
@@ -1572,12 +1657,88 @@ private fun FeatureWorkspace(
     onModels: () -> Unit
 ) {
 
+    if (feature == FeatureType.VIDEO) {
+
+        WanVideoWorkspace(
+            onBack = onBack
+        )
+
+        return
+    }
+
+    val context =
+        LocalContext.current
+
+    val scope =
+        rememberCoroutineScope()
+
+    val engine =
+        remember {
+            LocalLlmEngine(
+                context.applicationContext
+            )
+        }
+
     val selected =
         manager.selectedTextModel()
 
     var prompt by remember {
         mutableStateOf("")
     }
+
+    var output by remember {
+        mutableStateOf("")
+    }
+
+    var running by remember {
+        mutableStateOf(false)
+    }
+
+    var error by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    var generationJob by remember {
+        mutableStateOf<Job?>(null)
+    }
+
+    val systemPrompt =
+        when (feature) {
+
+            FeatureType.APP ->
+                """
+                You are Coder Abyss, a senior software engineer running locally
+                on an Android phone.
+
+                Turn the user's request into practical software.
+
+                Give:
+                1. architecture
+                2. files
+                3. complete code where practical
+                4. build/run instructions
+                5. testing notes
+
+                Prefer concise, functional solutions.
+                """.trimIndent()
+
+            FeatureType.RESEARCH ->
+                """
+                You are Coder Abyss local research assistant.
+                Produce well structured research, clearly separate facts,
+                assumptions and conclusions, and do not invent citations.
+                """.trimIndent()
+
+            FeatureType.VISUALS ->
+                """
+                You are Coder Abyss local visual design assistant.
+                Turn the request into detailed professional image-generation
+                prompts, layouts and visual specifications.
+                """.trimIndent()
+
+            else ->
+                "You are Coder Abyss."
+        }
 
     Column(
         modifier =
@@ -1596,29 +1757,16 @@ private fun FeatureWorkspace(
         )
 
         Spacer(
-            Modifier.height(22.dp)
-        )
-
-        Text(
-            "OFFLINE ENGINE",
-            color = AbyssBlue,
-            fontSize = 12.sp,
-            fontWeight =
-                FontWeight.Bold
-        )
-
-        Spacer(
-            Modifier.height(8.dp)
+            Modifier.height(20.dp)
         )
 
         Surface(
             modifier =
                 Modifier.fillMaxWidth(),
-
             shape =
                 RoundedCornerShape(18.dp),
-
-            color = AbyssPanel
+            color =
+                AbyssPanel
         ) {
 
             Column(
@@ -1626,47 +1774,46 @@ private fun FeatureWorkspace(
             ) {
 
                 Text(
-                    if (selected != null)
-                        selected.name
-                    else
-                        "No text model selected",
-
-                    color = AbyssText,
+                    selected?.name
+                        ?: "No local model selected",
+                    color =
+                        AbyssText,
                     fontWeight =
                         FontWeight.Bold
                 )
 
                 Spacer(
-                    Modifier.height(5.dp)
+                    Modifier.height(4.dp)
                 )
 
                 Text(
-                    if (selected != null)
-                        "${selected.quant} • ${selected.sizeLabel} • stored locally"
-                    else
-                        "Download and select a local text model.",
-
-                    color = AbyssMuted,
-                    fontSize = 11.sp
+                    selected?.let {
+                        "${it.quant} • ${it.sizeLabel} • OFFLINE"
+                    } ?: "Choose an installed GGUF model.",
+                    color =
+                        AbyssMuted,
+                    fontSize =
+                        11.sp
                 )
 
                 Spacer(
-                    Modifier.height(12.dp)
+                    Modifier.height(10.dp)
                 )
 
                 OutlinedButton(
-                    onClick = onModels
+                    onClick =
+                        onModels
                 ) {
 
                     Text(
-                        "Choose Offline Model"
+                        "Change Model"
                     )
                 }
             }
         }
 
         Spacer(
-            Modifier.height(20.dp)
+            Modifier.height(18.dp)
         )
 
         OutlinedTextField(
@@ -1681,63 +1828,466 @@ private fun FeatureWorkspace(
             label = {
                 Text(
                     when (feature) {
-
                         FeatureType.APP ->
                             "Describe the app you want"
 
                         FeatureType.RESEARCH ->
-                            "Research topic or instructions"
-
-                        FeatureType.VIDEO ->
-                            "Describe the video"
+                            "Enter your research request"
 
                         FeatureType.VISUALS ->
                             "Describe the visual"
+
+                        else ->
+                            "Prompt"
                     }
                 )
             }
         )
 
         Spacer(
+            Modifier.height(14.dp)
+        )
+
+        if (!running) {
+
+            Button(
+                onClick = {
+
+                    if (selected == null) {
+                        onModels()
+                        return@Button
+                    }
+
+                    if (prompt.isBlank()) {
+                        error =
+                            "Enter a prompt first."
+                        return@Button
+                    }
+
+                    error = null
+                    output = ""
+                    running = true
+
+                    generationJob =
+                        scope.launch {
+
+                            try {
+
+                                engine.generate(
+                                    modelPath =
+                                        manager
+                                            .modelFile(
+                                                selected
+                                            )
+                                            .absolutePath,
+                                    systemPrompt =
+                                        systemPrompt,
+                                    prompt =
+                                        prompt
+                                ) { token ->
+
+                                    output += token
+                                }
+
+                            } catch (
+                                e: Exception
+                            ) {
+
+                                error =
+                                    e.message
+                                        ?: "Local generation failed."
+
+                            } finally {
+
+                                running =
+                                    false
+                            }
+                        }
+                },
+                modifier =
+                    Modifier.fillMaxWidth()
+            ) {
+
+                Icon(
+                    Icons.Rounded.PlayArrow,
+                    null
+                )
+
+                Spacer(
+                    Modifier.width(8.dp)
+                )
+
+                Text(
+                    if (selected == null)
+                        "Select Offline Model"
+                    else
+                        "Run Prompt Offline"
+                )
+            }
+
+        } else {
+
+            Button(
+                onClick = {
+
+                    generationJob?.cancel()
+                    running = false
+                },
+                modifier =
+                    Modifier.fillMaxWidth()
+            ) {
+
+                Icon(
+                    Icons.Rounded.Stop,
+                    null
+                )
+
+                Spacer(
+                    Modifier.width(8.dp)
+                )
+
+                Text(
+                    "Stop Generation"
+                )
+            }
+        }
+
+        if (running) {
+
+            Spacer(
+                Modifier.height(10.dp)
+            )
+
+            LinearProgressIndicator(
+                modifier =
+                    Modifier.fillMaxWidth()
+            )
+        }
+
+        error?.let {
+
+            Spacer(
+                Modifier.height(12.dp)
+            )
+
+            Text(
+                it,
+                color =
+                    AbyssDanger
+            )
+        }
+
+        if (
+            output.isNotBlank()
+        ) {
+
+            Spacer(
+                Modifier.height(18.dp)
+            )
+
+            Text(
+                "OUTPUT",
+                color =
+                    AbyssBlue,
+                fontWeight =
+                    FontWeight.Bold,
+                fontSize =
+                    12.sp
+            )
+
+            Spacer(
+                Modifier.height(8.dp)
+            )
+
+            Surface(
+                modifier =
+                    Modifier.fillMaxWidth(),
+                shape =
+                    RoundedCornerShape(16.dp),
+                color =
+                    AbyssPanel
+            ) {
+
+                Text(
+                    output,
+                    modifier =
+                        Modifier.padding(16.dp),
+                    color =
+                        AbyssText
+                )
+            }
+
+            Spacer(
+                Modifier.height(8.dp)
+            )
+
+            OutlinedButton(
+                onClick = {
+                    output = ""
+                },
+                modifier =
+                    Modifier.fillMaxWidth()
+            ) {
+
+                Text(
+                    "Clear Output"
+                )
+            }
+        }
+
+        Spacer(
+            Modifier.height(30.dp)
+        )
+    }
+}
+
+@Composable
+private fun WanVideoWorkspace(
+    onBack: () -> Unit
+) {
+
+    val context =
+        LocalContext.current
+
+    val scope =
+        rememberCoroutineScope()
+
+    val client =
+        remember {
+            WanVideoClient(
+                context.applicationContext
+            )
+        }
+
+    var prompt by remember {
+        mutableStateOf("")
+    }
+
+    var hfToken by remember {
+        mutableStateOf("")
+    }
+
+    var status by remember {
+        mutableStateOf(
+            "Ready"
+        )
+    }
+
+    var generating by remember {
+        mutableStateOf(false)
+    }
+
+    var videoUri by remember {
+        mutableStateOf<android.net.Uri?>(null)
+    }
+
+    Column(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(
+                    rememberScrollState()
+                )
+                .padding(18.dp)
+    ) {
+
+        ScreenHeader(
+            "Create video",
+            "Official Wan-AI 2.1 through Hugging Face Inference Providers.",
+            onBack
+        )
+
+        Spacer(
+            Modifier.height(20.dp)
+        )
+
+        Surface(
+            modifier =
+                Modifier.fillMaxWidth(),
+            shape =
+                RoundedCornerShape(16.dp),
+            color =
+                AbyssPanel
+        ) {
+
+            Column(
+                Modifier.padding(15.dp)
+            ) {
+
+                Text(
+                    "Wan-AI / Wan2.1 T2V 1.3B",
+                    color =
+                        AbyssText,
+                    fontWeight =
+                        FontWeight.Bold
+                )
+
+                Text(
+                    "Hosted by Hugging Face Inference Providers / Fal AI",
+                    color =
+                        AbyssMuted,
+                    fontSize =
+                        11.sp
+                )
+            }
+        }
+
+        Spacer(
             Modifier.height(16.dp)
         )
 
+        OutlinedTextField(
+            value =
+                hfToken,
+            onValueChange = {
+                hfToken = it.trim()
+            },
+            modifier =
+                Modifier.fillMaxWidth(),
+            label = {
+                Text(
+                    "Hugging Face token"
+                )
+            },
+            visualTransformation =
+                PasswordVisualTransformation(),
+            singleLine = true
+        )
+
+        Spacer(
+            Modifier.height(14.dp)
+        )
+
+        OutlinedTextField(
+            value = prompt,
+            onValueChange = {
+                prompt = it
+            },
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(180.dp),
+            label = {
+                Text(
+                    "Describe your video"
+                )
+            }
+        )
+
+        Spacer(
+            Modifier.height(14.dp)
+        )
+
         Button(
-            onClick = onModels,
             enabled =
-                selected == null,
+                !generating &&
+                hfToken.isNotBlank() &&
+                prompt.isNotBlank(),
+            onClick = {
+
+                generating = true
+                videoUri = null
+
+                scope.launch {
+
+                    try {
+
+                        videoUri =
+                            client.generate(
+                                hfToken =
+                                    hfToken,
+                                prompt =
+                                    prompt
+                            ) {
+                                status = it
+                            }
+
+                        status =
+                            "Saved to Movies/CoderAbyss"
+
+                    } catch (
+                        e: Exception
+                    ) {
+
+                        status =
+                            e.message
+                                ?: "Video generation failed."
+
+                    } finally {
+
+                        generating =
+                            false
+                    }
+                }
+            },
             modifier =
                 Modifier.fillMaxWidth()
         ) {
 
             Text(
-                if (selected == null)
-                    "Install / Select Model"
+                if (generating)
+                    "Generating..."
                 else
-                    "Offline model ready"
+                    "Generate with Wan"
             )
         }
 
-        if (selected != null) {
+        Spacer(
+            Modifier.height(12.dp)
+        )
+
+        Text(
+            status,
+            color =
+                if (
+                    status.contains(
+                        "failed",
+                        true
+                    ) ||
+                    status.contains(
+                        "error",
+                        true
+                    )
+                )
+                    AbyssDanger
+                else
+                    AbyssMuted
+        )
+
+        videoUri?.let { uri ->
 
             Spacer(
                 Modifier.height(14.dp)
             )
 
-            Surface(
-                shape =
-                    RoundedCornerShape(14.dp),
-                color =
-                    Color(0xFF072638)
+            Button(
+                onClick = {
+
+                    val intent =
+                        Intent(
+                            Intent.ACTION_VIEW
+                        ).apply {
+
+                            setDataAndType(
+                                uri,
+                                "video/mp4"
+                            )
+
+                            addFlags(
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            )
+                        }
+
+                    context.startActivity(
+                        intent
+                    )
+                },
+                modifier =
+                    Modifier.fillMaxWidth()
             ) {
 
                 Text(
-                    "The model-management layer is now real. The next native build connects this selected GGUF directly to llama.cpp so Generate runs completely offline.",
-                    modifier =
-                        Modifier.padding(14.dp),
-                    color =
-                        Color(0xFFB9E8F5),
-                    fontSize = 12.sp
+                    "Open Generated Video"
                 )
             }
         }
@@ -1804,9 +2354,11 @@ private fun LibraryScreen(
     }
 }
 
+
 @Composable
 private fun SettingsScreen(
-    manager: OfflineModelManager
+    manager: OfflineModelManager,
+    onModels: () -> Unit
 ) {
 
     var wifiOnly by remember {
@@ -1827,8 +2379,10 @@ private fun SettingsScreen(
 
         Text(
             "Settings",
-            color = AbyssText,
-            fontSize = 27.sp,
+            color =
+                AbyssText,
+            fontSize =
+                27.sp,
             fontWeight =
                 FontWeight.Bold
         )
@@ -1837,13 +2391,38 @@ private fun SettingsScreen(
             Modifier.height(20.dp)
         )
 
+        Button(
+            onClick =
+                onModels,
+            modifier =
+                Modifier.fillMaxWidth()
+        ) {
+
+            Icon(
+                Icons.Rounded.Memory,
+                null
+            )
+
+            Spacer(
+                Modifier.width(8.dp)
+            )
+
+            Text(
+                "Model Manager"
+            )
+        }
+
+        Spacer(
+            Modifier.height(12.dp)
+        )
+
         SettingCard(
             icon =
                 Icons.Rounded.Security,
             title =
                 "Local First",
             subtitle =
-                "Downloaded models and projects stay on this device."
+                "Downloaded GGUF and Whisper models remain on this device."
         )
 
         Spacer(
@@ -1853,7 +2432,8 @@ private fun SettingsScreen(
         Surface(
             shape =
                 RoundedCornerShape(16.dp),
-            color = AbyssPanel
+            color =
+                AbyssPanel
         ) {
 
             Row(
@@ -1861,7 +2441,6 @@ private fun SettingsScreen(
                     Modifier
                         .fillMaxWidth()
                         .padding(15.dp),
-
                 verticalAlignment =
                     Alignment.CenterVertically
             ) {
@@ -1869,7 +2448,8 @@ private fun SettingsScreen(
                 Icon(
                     Icons.Rounded.Wifi,
                     null,
-                    tint = AbyssBlue
+                    tint =
+                        AbyssBlue
                 )
 
                 Spacer(
@@ -1882,25 +2462,28 @@ private fun SettingsScreen(
 
                     Text(
                         "Wi-Fi only model downloads",
-                        color = AbyssText
+                        color =
+                            AbyssText
                     )
 
                     Text(
-                        "Avoid large model downloads over mobile data.",
-                        color = AbyssMuted,
-                        fontSize = 11.sp
+                        "Avoid multi-gigabyte model downloads over mobile data.",
+                        color =
+                            AbyssMuted,
+                        fontSize =
+                            11.sp
                     )
                 }
 
                 Switch(
-                    checked = wifiOnly,
-
+                    checked =
+                        wifiOnly,
                     onCheckedChange = {
 
                         wifiOnly = it
-
-                        manager
-                            .setWifiOnly(it)
+                        manager.setWifiOnly(
+                            it
+                        )
                     }
                 )
             }
@@ -1912,11 +2495,11 @@ private fun SettingsScreen(
 
         SettingCard(
             icon =
-                Icons.Rounded.CloudOff,
+                Icons.Rounded.Cloud,
             title =
-                "Online APIs",
+                "Online AI Providers",
             subtitle =
-                "Disabled for now. GPT, Claude and other API providers can be added later without replacing local mode."
+                "Wan video uses Hugging Face only when requested. GPT, Claude and other API providers can be added later."
         )
 
         Spacer(
@@ -1924,8 +2507,9 @@ private fun SettingsScreen(
         )
 
         Text(
-            "Model folder",
-            color = AbyssBlue,
+            "Model storage",
+            color =
+                AbyssBlue,
             fontWeight =
                 FontWeight.Bold
         )
@@ -1938,8 +2522,10 @@ private fun SettingsScreen(
             manager
                 .modelDirectory
                 .absolutePath,
-            color = AbyssMuted,
-            fontSize = 11.sp
+            color =
+                AbyssMuted,
+            fontSize =
+                11.sp
         )
     }
 }

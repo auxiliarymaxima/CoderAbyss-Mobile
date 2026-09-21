@@ -10,10 +10,10 @@ android {
 
     defaultConfig {
         applicationId = "com.coderabyss.mobile"
-        minSdk = 26
+        minSdk = 33
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2"
+        versionCode = 3
+        versionName = "0.3"
     }
 
     buildFeatures {
@@ -37,6 +37,10 @@ android {
 }
 
 dependencies {
+    implementation(project(":llamaLib"))
+    implementation(project(":whisperLib"))
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
 
     implementation("androidx.core:core-ktx:1.15.0")

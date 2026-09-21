@@ -8,6 +8,7 @@ pluginManagement {
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+
     repositories {
         google()
         mavenCentral()
@@ -15,4 +16,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "CoderAbyss"
+
 include(":app")
+include(":llamaLib")
+include(":whisperLib")
