@@ -2911,8 +2911,8 @@ private fun PromptVoiceInput(
     ) {
         Icon(Icons.Rounded.Mic, contentDescription = null)
         Text(when {
-            recording -> "Listening — tap to stop"
-            transcribing -> "Whisper is transcribing…"
+            recording -> "Listening - tap to stop"
+            transcribing -> "Whisper is transcribing..."
             else -> "Tap to Speak"
         })
     }
