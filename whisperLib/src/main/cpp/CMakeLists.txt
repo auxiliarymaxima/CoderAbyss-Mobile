@@ -38,6 +38,7 @@ message(
 set(
     SOURCE_FILES
     ${WHISPER_ROOT}/src/whisper.cpp
+    ${WHISPER_ROOT}/src/aneforge/whisper-aneforge.cpp
     ${CMAKE_CURRENT_LIST_DIR}/jni.c
 )
 
