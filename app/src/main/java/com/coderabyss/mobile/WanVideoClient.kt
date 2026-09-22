@@ -44,7 +44,7 @@ class WanVideoClient(
         prompt: String,
         onStatus:
             suspend (String) -> Unit
-    ): Uri =
+    ): java.io.File =
         withContext(
             Dispatchers.IO
         ) {
@@ -222,7 +222,7 @@ class WanVideoClient(
                     )
 
             onStatus(
-                "Saving video..."
+                "Downloading preview..."
             )
 
             saveVideo(
@@ -257,75 +257,17 @@ class WanVideoClient(
         }
     }
 
-    private fun saveVideo(
-        url: String
-    ): Uri {
-
-        val request =
-            Request.Builder()
-                .url(url)
-                .build()
-
-        client.newCall(
-            request
-        ).execute().use { response ->
-
-            if (!response.isSuccessful)
-                error(
-                    "Video download failed."
-                )
-
-            val resolver =
-                context.contentResolver
-
-            val values =
-                ContentValues().apply {
-
-                    put(
-                        MediaStore.Video
-                            .Media.DISPLAY_NAME,
-                        "coder_abyss_wan_" +
-                            System.currentTimeMillis() +
-                            ".mp4"
-                    )
-
-                    put(
-                        MediaStore.Video
-                            .Media.MIME_TYPE,
-                        "video/mp4"
-                    )
-
-                    put(
-                        MediaStore.Video
-                            .Media.RELATIVE_PATH,
-                        "Movies/CoderAbyss"
-                    )
-                }
-
-            val uri =
-                resolver.insert(
-                    MediaStore.Video
-                        .Media
-                        .EXTERNAL_CONTENT_URI,
-                    values
-                )
-                    ?: error(
-                        "Could not create video file."
-                    )
-
-            resolver
-                .openOutputStream(
-                    uri
-                )!!.use { output ->
-
-                    response.body!!
-                        .byteStream()
-                        .copyTo(
-                            output
-                        )
-                }
-
-            return uri
-        }
+    private fun saveVideo(url: String): java.io.File {
+        val dir = java.io.File(context.cacheDir, "video-previews").apply { mkdirs() }
+        val preview = java.io.File.createTempFile("hosted-wan-", ".mp4", dir)
+        try {
+            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                check(response.isSuccessful) { "Video download failed: HTTP ${response.code}" }
+                val body = response.body ?: error("Empty video response")
+                val written = preview.outputStream().use { output -> body.byteStream().use { it.copyTo(output) } }
+                check(written > 0 && (body.contentLength() < 0 || written == body.contentLength())) { "Video download was incomplete" }
+            }
+            return preview
+        } catch (e: Exception) { preview.delete(); throw e }
     }
 }

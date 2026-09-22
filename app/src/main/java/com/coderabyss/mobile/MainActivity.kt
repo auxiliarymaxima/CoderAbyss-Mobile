@@ -74,7 +74,7 @@ private enum class FeatureType(
 
     VIDEO(
         "Create video",
-        "Generate video with Wan through Hugging Face Inference Providers."
+        "Generate and preview Wan videos on your phone or with a hosted provider."
     ),
 
     RESEARCH(
@@ -1472,7 +1472,8 @@ private fun ModelCard(
                 transfer.status ==
                     TransferStatus.QUEUED ||
                 transfer.status ==
-                    TransferStatus.PAUSED
+                    TransferStatus.PAUSED ||
+                transfer.status == TransferStatus.VERIFYING
             ) {
 
                 Spacer(
@@ -1499,7 +1500,8 @@ private fun ModelCard(
                     )
                         "Queued..."
                     else
-                        "${transfer.progress}% downloaded",
+                        if (transfer.status == TransferStatus.VERIFYING) "Verifying downloaded files..."
+                        else "${transfer.progress}% - ${android.text.format.Formatter.formatFileSize(LocalContext.current, transfer.downloaded)} / ${android.text.format.Formatter.formatFileSize(LocalContext.current, transfer.total)}",
 
                     color = AbyssBlue,
                     fontSize = 11.sp
@@ -1516,12 +1518,18 @@ private fun ModelCard(
                 )
 
                 Text(
-                    "Download failed. Tap Retry.",
+                    transfer.message.ifBlank { "Download failed. Tap Retry." },
                     color = AbyssDanger,
                     fontSize = 11.sp
                 )
             }
 
+            if (transfer.status == TransferStatus.PAUSED || transfer.status == TransferStatus.VERIFYING) {
+                Text(transfer.message, color = AbyssMuted, fontSize = 11.sp)
+            }
+            if (transfer.status == TransferStatus.FAILED) {
+                TextButton(onClick = { manager.cancelDownload(model) }) { Text("Cancel remaining downloads") }
+            }
             Spacer(
                 Modifier.height(12.dp)
             )
@@ -1582,7 +1590,8 @@ private fun ModelCard(
 
                     TransferStatus.DOWNLOADING,
                     TransferStatus.QUEUED,
-                    TransferStatus.PAUSED -> {
+                    TransferStatus.PAUSED,
+                    TransferStatus.VERIFYING -> {
 
                         OutlinedButton(
                             onClick = {
@@ -2070,262 +2079,144 @@ private fun WanVideoWorkspace(
     onModels: () -> Unit,
     onBack: () -> Unit
 ) {
-
-    val context =
-        LocalContext.current
-
-    val scope =
-        rememberCoroutineScope()
-
-    val client =
-        remember {
-            WanVideoClient(
-                context.applicationContext
-            )
-        }
-
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val prefs = remember { context.getSharedPreferences("coder_abyss_video", android.content.Context.MODE_PRIVATE) }
+    var local by remember { mutableStateOf(prefs.getBoolean("on_device", true)) }
+    var preset by remember { mutableStateOf(prefs.getInt("preset", 0).coerceIn(0,2)) }
+    val presets = listOf("256 x 256, ~1 second", "384 x 256, ~2 seconds", "512 x 288, ~3 seconds")
+    var prompt by remember { mutableStateOf("") }
+    var hfToken by remember { mutableStateOf("") }
     var voiceBusy by remember { mutableStateOf(false) }
-
-    var prompt by remember {
-        mutableStateOf("")
+    var generating by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("Ready") }
+    var job by remember { mutableStateOf<Job?>(null) }
+    var preview by remember {
+        mutableStateOf(prefs.getString("last_preview", null)?.let { java.io.File(it) }?.takeIf { it.isFile })
     }
-
-    var hfToken by remember {
-        mutableStateOf("")
+    var saved by remember { mutableStateOf(false) }
+    val transfer by produceState(manager.state(ModelCatalog.wan)) {
+        while (true) { value = manager.state(ModelCatalog.wan); delay(1000) }
     }
-
-    var status by remember {
-        mutableStateOf(
-            "Ready"
-        )
+    val player = remember { android.widget.VideoView(context) }
+    DisposableEffect(player) { onDispose { player.stopPlayback() } }
+    val view = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(generating) {
+        val previous = view.keepScreenOn
+        if (generating) view.keepScreenOn = true
+        onDispose { view.keepScreenOn = previous }
     }
-
-    var generating by remember {
-        mutableStateOf(false)
-    }
-
-    var videoUri by remember {
-        mutableStateOf<android.net.Uri?>(null)
-    }
-
-    Column(
-        modifier =
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(
-                    rememberScrollState()
-                )
-                .padding(18.dp)
-    ) {
-
-        ScreenHeader(
-            "Create video",
-            "Official Wan-AI 2.1 through Hugging Face Inference Providers.",
-            onBack
-        )
-
-        Spacer(
-            Modifier.height(20.dp)
-        )
-
-        Surface(
-            modifier =
-                Modifier.fillMaxWidth(),
-            shape =
-                RoundedCornerShape(16.dp),
-            color =
-                AbyssPanel
-        ) {
-
-            Column(
-                Modifier.padding(15.dp)
-            ) {
-
-                Text(
-                    manager.videoModelId(),
-                    color =
-                        AbyssText,
-                    fontWeight =
-                        FontWeight.Bold
-                )
-
-                Text(
-                    "Hosted by Hugging Face Inference Providers / Fal AI",
-                    color =
-                        AbyssMuted,
-                    fontSize =
-                        11.sp
-                )
-            }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
+        ScreenHeader("Create video", "Wan 2.1 - generate, preview, then save as MP4.", onBack)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = local, enabled = !generating, onClick = {
+                local = true; prefs.edit().putBoolean("on_device", true).apply()
+            }, label = { Text("On-device") })
+            FilterChip(selected = !local, enabled = !generating, onClick = {
+                local = false; prefs.edit().putBoolean("on_device", false).apply()
+            }, label = { Text("Hosted") })
         }
-
-        Spacer(
-            Modifier.height(16.dp)
-        )
-
-        OutlinedTextField(
-            value =
-                hfToken,
-            onValueChange = {
-                hfToken = it.trim()
-            },
-            modifier =
-                Modifier.fillMaxWidth(),
-            label = {
-                Text(
-                    "Hugging Face token"
-                )
-            },
-            visualTransformation =
-                PasswordVisualTransformation(),
-            singleLine = true
-        )
-
-        Spacer(
-            Modifier.height(14.dp)
-        )
-
+        if (local) {
+            Text("Wan 2.1 1.3B Q4 - runs entirely on this phone", color = AbyssText)
+            Text("CPU generation can take a long time. Keep this screen open. Devices with insufficient RAM may fail to generate.", color = AbyssMuted, fontSize = 12.sp)
+            Text(if (transfer.status == TransferStatus.INSTALLED) "All 3 model files verified - ready offline"
+                else "Wan package: ${transfer.status.name.lowercase()} (${transfer.progress}%)", color = AbyssBlue)
+            OutlinedButton(enabled = !generating, onClick = onModels) { Text("Manage Wan download (4.89 GB)") }
+            presets.forEachIndexed { index, label ->
+                FilterChip(selected = preset == index, enabled = !generating, onClick = {
+                    preset = index; prefs.edit().putInt("preset", index).apply()
+                }, label = { Text(label) })
+            }
+        } else {
+            Text("Wan via Hugging Face / Fal. Internet and provider credits required.", color = AbyssMuted)
+            OutlinedTextField(value = hfToken, onValueChange = { hfToken = it.trim() }, enabled = !generating,
+                label = { Text("Hugging Face token") }, visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(), singleLine = true)
+        }
         PromptVoiceInput(manager, onModels, enabled = !generating, onBusy = { voiceBusy = it }) { text ->
             prompt = listOf(prompt, text).filter { it.isNotBlank() }.joinToString("\n")
         }
-
-        OutlinedTextField(
-            value = prompt,
-            onValueChange = {
-                prompt = it
-            },
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .height(180.dp),
-            label = {
-                Text(
-                    "Describe your video"
-                )
-            }
-        )
-
-        Spacer(
-            Modifier.height(14.dp)
-        )
-
-        Button(
-            enabled =
-                !generating && !voiceBusy &&
-                hfToken.isNotBlank() &&
-                prompt.isNotBlank(),
-            onClick = {
-
-                generating = true
-                videoUri = null
-
-                scope.launch {
-
-                    try {
-
-                        videoUri =
-                            client.generate(
-                                hfToken =
-                                    hfToken,
-                                prompt =
-                                    prompt
-                            ) {
-                                status = it
+        OutlinedTextField(value = prompt, onValueChange = { prompt = it }, enabled = !generating,
+            modifier = Modifier.fillMaxWidth().height(160.dp), label = { Text("Describe your video") })
+        Spacer(Modifier.height(12.dp))
+        if (generating) {
+            OutlinedButton(onClick = { status = "Stopping and releasing models..."; job?.cancel() }) { Text("Cancel generation") }
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        } else {
+            Button(enabled = !voiceBusy && !saving && prompt.isNotBlank() &&
+                (if (local) transfer.status == TransferStatus.INSTALLED else hfToken.isNotBlank()),
+                modifier = Modifier.fillMaxWidth(), onClick = {
+                    val request = prompt
+                    val useLocal = local
+                    val choice = preset
+                    val token = hfToken
+                    generating = true
+                    player.pause()
+                    status = "Preparing generation..."
+                    job = scope.launch {
+                        try {
+                            val result = if (useLocal) {
+                                val widths = intArrayOf(256,384,512)
+                                val heights = intArrayOf(256,256,288)
+                                LocalWanEngine(context.applicationContext).generate(manager, request, widths[choice], heights[choice],
+                                    17 + choice * 16, 20) { status = it }
+                            } else {
+                                WanVideoClient(context.applicationContext).generate(token, request) { text ->
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { status = text }
+                                }
                             }
-
-                        status =
-                            "Saved to Movies/CoderAbyss"
-
-                    } catch (
-                        e: Exception
-                    ) {
-
-                        status =
-                            e.message
-                                ?: "Video generation failed."
-
-                    } finally {
-
-                        generating =
-                            false
+                            val previous = preview
+                            preview = result
+                            saved = false
+                            prefs.edit().putString("last_preview", result.absolutePath).apply()
+                            if (previous != result) previous?.delete()
+                            status = "Preview ready. Tap Play, then Save MP4 if you want to keep it."
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            status = "Generation cancelled"
+                            throw e
+                        } catch (e: Exception) {
+                            status = e.message ?: "Video generation failed"
+                        } finally { generating = false }
                     }
-                }
-            },
-            modifier =
-                Modifier.fillMaxWidth()
-        ) {
-
-            Text(
-                if (generating)
-                    "Generating..."
-                else
-                    "Generate with Wan"
-            )
+                }) { Text(if (local) "Generate on this phone" else "Generate with hosted Wan") }
         }
-
-        Spacer(
-            Modifier.height(12.dp)
-        )
-
-        Text(
-            status,
-            color =
-                if (
-                    status.contains(
-                        "failed",
-                        true
-                    ) ||
-                    status.contains(
-                        "error",
-                        true
-                    )
-                )
-                    AbyssDanger
-                else
-                    AbyssMuted
-        )
-
-        videoUri?.let { uri ->
-
-            Spacer(
-                Modifier.height(14.dp)
-            )
-
-            Button(
-                onClick = {
-
-                    val intent =
-                        Intent(
-                            Intent.ACTION_VIEW
-                        ).apply {
-
-                            setDataAndType(
-                                uri,
-                                "video/mp4"
-                            )
-
-                            addFlags(
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION
-                            )
-                        }
-
-                    context.startActivity(
-                        intent
-                    )
-                },
-                modifier =
-                    Modifier.fillMaxWidth()
-            ) {
-
-                Text(
-                    "Open Generated Video"
-                )
+        Text(status, color = AbyssMuted, modifier = Modifier.padding(vertical = 10.dp))
+        Text("VIDEO OUTPUT", color = AbyssBlue, fontWeight = FontWeight.Bold)
+        Surface(color = AbyssPanel, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().height(240.dp)) {
+            val file = preview
+            if (file == null) {
+                Box(contentAlignment = Alignment.Center) { Text("Your generated video preview will appear here.", color = AbyssMuted, modifier = Modifier.padding(16.dp)) }
+            } else {
+                androidx.compose.ui.viewinterop.AndroidView(factory = {
+                    player.apply {
+                        setMediaController(android.widget.MediaController(context).also { it.setAnchorView(this) })
+                        setOnPreparedListener { it.isLooping = false; seekTo(1) }
+                        setOnErrorListener { _, what, extra -> status = "Preview playback failed ($what/$extra)."; true }
+                    }
+                }, update = {
+                    if (it.tag != file.absolutePath) {
+                        it.tag = file.absolutePath
+                        it.setVideoURI(android.net.Uri.fromFile(file))
+                    }
+                }, modifier = Modifier.fillMaxSize())
             }
         }
-
-        Spacer(
-            Modifier.height(30.dp)
-        )
+        if (preview != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { player.start() }) { Text("Play preview") }
+                Button(enabled = !saving && !generating && !saved, onClick = {
+                    val file = preview ?: return@Button
+                    saving = true
+                    scope.launch {
+                        try { VideoStorage.save(context, file); saved = true; status = "MP4 saved to Movies/CoderAbyss" }
+                        catch (e: Exception) { status = e.message ?: "Could not save MP4" }
+                        finally { saving = false }
+                    }
+                }) { Text(if (saved) "Saved" else if (saving) "Saving..." else "Save MP4") }
+            }
+            Text("Preview stays in app cache until replaced or cleared. Saving adds a copy to your gallery.", color = AbyssMuted, fontSize = 12.sp)
+        }
     }
 }
 

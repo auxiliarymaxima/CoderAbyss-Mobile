@@ -7,6 +7,7 @@ import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
 import java.io.File
+import kotlinx.coroutines.launch
 
 enum class ModelKind {
     TEXT,
@@ -24,12 +25,22 @@ data class OfflineModel(
     val quant: String,
     val sizeLabel: String,
     val fileName: String,
-    val url: String
+    val url: String,
+    val additionalFiles: List<String> = emptyList()
 )
 
 object ModelCatalog {
+    val wan = OfflineModel(
+        id = "wan-2.1-1.3b-q4", name = "Wan 2.1 Video 1.3B",
+        family = "Wan", purpose = "Offline video + text encoder + decoder (3 files)",
+        kind = ModelKind.VIDEO, quant = "Q4_K_M", sizeLabel = "4.89 GB total",
+        fileName = "Wan2.1-T2V-1.3B-Q4_K_M.gguf", url = "",
+        additionalFiles = listOf("umt5-xxl-encoder-Q4_K_M.gguf", "wan_2.1_vae.safetensors")
+    )
+
 
     val models = listOf(
+        wan,
 
         OfflineModel(
             id = "qwen-coder-1.5b-q4",
@@ -116,6 +127,7 @@ enum class TransferStatus {
     QUEUED,
     DOWNLOADING,
     PAUSED,
+    VERIFYING,
     INSTALLED,
     FAILED
 }
@@ -125,7 +137,8 @@ data class ModelTransferState(
     val progress: Int = 0,
     val downloaded: Long = 0,
     val total: Long = 0,
-    val reason: Int = 0
+    val reason: Int = 0,
+    val message: String = ""
 )
 
 class OfflineModelManager(context: Context) {
@@ -155,13 +168,22 @@ class OfflineModelManager(context: Context) {
     fun modelFile(model: OfflineModel): File =
         File(modelDirectory, model.fileName)
 
-    fun isInstalled(model: OfflineModel): Boolean {
-        val file = modelFile(model)
+    private val manifest = org.json.JSONObject(appContext.assets.open("model-manifest.json").bufferedReader().use { it.readText() })
+    private val checking = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val epochs = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
-        return file.exists() &&
-                file.isFile &&
-                file.length() > 1024 * 1024
+    private fun files(model: OfflineModel) = listOf(model.fileName) + model.additionalFiles
+    private fun spec(name: String) = manifest.getJSONObject(name)
+    private fun size(name: String) = spec(name).getLong("size")
+    private fun key(name: String) = "asset_download_$name"
+    private fun verified(name: String): Boolean {
+        val f = File(modelDirectory, name)
+        return f.isFile && f.length() == size(name) &&
+            prefs.getString("verified_$name", null) == "${spec(name).getString("sha256")}:${f.lastModified()}"
     }
+
+    fun isInstalled(model: OfflineModel): Boolean = files(model).all { verified(it) }
 
     fun installedModels(): List<OfflineModel> =
         ModelCatalog.models.filter {
@@ -247,218 +269,142 @@ class OfflineModelManager(context: Context) {
             .apply()
     }
 
-    private fun downloadKey(model: OfflineModel) =
-        "download_${model.id}"
+    private fun downloadId(model: OfflineModel, name: String): Long =
+        prefs.getLong(key(name), if (name == model.fileName) prefs.getLong("download_${model.id}", -1L) else -1L)
 
-    fun startDownload(
-        model: OfflineModel
-    ): Long {
-
-        if (isInstalled(model))
-            return -1L
-
-        cancelDownload(model)
-
-        modelDirectory.mkdirs()
-
-        val request =
-            DownloadManager.Request(
-                Uri.parse(model.url)
-            )
-                .setTitle(model.name)
-                .setDescription(
-                    "Downloading ${model.sizeLabel} for offline use"
-                )
-                .setAllowedOverRoaming(false)
-                .setNotificationVisibility(
-                    DownloadManager.Request
-                        .VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                )
-                .setDestinationInExternalFilesDir(
-                    appContext,
-                    null,
-                    "models/${model.fileName}"
-                )
-
-        if (wifiOnly()) {
-
-            request.setAllowedNetworkTypes(
-                DownloadManager.Request.NETWORK_WIFI
-            )
-
-            request.setAllowedOverMetered(false)
-
-        } else {
-
-            request.setAllowedOverMetered(true)
-        }
-
-        val id =
-            downloadManager.enqueue(request)
-
-        prefs.edit()
-            .putLong(
-                downloadKey(model),
-                id
-            )
-            .apply()
-
-        return id
-    }
-
-    fun cancelDownload(model: OfflineModel) {
-
-        val id =
-            prefs.getLong(
-                downloadKey(model),
-                -1L
-            )
-
-        if (id > 0) {
-            downloadManager.remove(id)
-        }
-
-        prefs.edit()
-            .remove(downloadKey(model))
-            .apply()
-    }
-
-    fun remove(model: OfflineModel) {
-
-        cancelDownload(model)
-
-        val file = modelFile(model)
-
-        if (file.exists()) {
-            file.delete()
-        }
-
-        if (
-            selectedModelId() == model.id
-        ) {
-            selectedId = null
-            prefs.edit()
-                .remove(
-                    "selected_text_model"
-                )
-                .apply()
-        }
-    }
-
-    fun state(
-        model: OfflineModel
-    ): ModelTransferState {
-
-        if (isInstalled(model)) {
-
-            return ModelTransferState(
-                status =
-                    TransferStatus.INSTALLED,
-                progress = 100
-            )
-        }
-
-        val id =
-            prefs.getLong(
-                downloadKey(model),
-                -1L
-            )
-
-        if (id <= 0) {
-
-            return ModelTransferState(
-                TransferStatus.NOT_INSTALLED
-            )
-        }
-
-        val query =
-            DownloadManager.Query()
-                .setFilterById(id)
-
-        downloadManager
-            .query(query)
-            .use { cursor ->
-
-                if (!cursor.moveToFirst()) {
-
-                    return ModelTransferState(
-                        TransferStatus.NOT_INSTALLED
-                    )
-                }
-
-                val status =
-                    cursor.getInt(
-                        cursor.getColumnIndexOrThrow(
-                            DownloadManager.COLUMN_STATUS
-                        )
-                    )
-
-                val downloaded =
-                    cursor.getLong(
-                        cursor.getColumnIndexOrThrow(
-                            DownloadManager
-                                .COLUMN_BYTES_DOWNLOADED_SO_FAR
-                        )
-                    )
-
-                val total =
-                    cursor.getLong(
-                        cursor.getColumnIndexOrThrow(
-                            DownloadManager
-                                .COLUMN_TOTAL_SIZE_BYTES
-                        )
-                    )
-
-                val reason =
-                    cursor.getInt(
-                        cursor.getColumnIndexOrThrow(
-                            DownloadManager.COLUMN_REASON
-                        )
-                    )
-
-                val progress =
-                    if (total > 0)
-                        (
-                            downloaded * 100L /
-                                    total
-                            ).toInt()
-                    else
-                        0
-
-                val transferStatus =
-                    when (status) {
-
-                        DownloadManager
-                            .STATUS_PENDING ->
-                            TransferStatus.QUEUED
-
-                        DownloadManager
-                            .STATUS_RUNNING ->
-                            TransferStatus.DOWNLOADING
-
-                        DownloadManager
-                            .STATUS_PAUSED ->
-                            TransferStatus.PAUSED
-
-                        DownloadManager
-                            .STATUS_SUCCESSFUL ->
-                            TransferStatus.INSTALLED
-
-                        DownloadManager
-                            .STATUS_FAILED ->
-                            TransferStatus.FAILED
-
-                        else ->
-                            TransferStatus.NOT_INSTALLED
-                    }
-
-                return ModelTransferState(
-                    status = transferStatus,
-                    progress = progress,
-                    downloaded = downloaded,
-                    total = total,
-                    reason = reason
-                )
+    @Synchronized
+    fun startDownload(model: OfflineModel): Long {
+        if (isInstalled(model)) return -1L
+        if (files(model).any { checking.contains(it) }) return -1L
+        var lastId = -1L
+        try {
+            for (name in files(model)) {
+                if (verified(name)) continue
+                val old = downloadId(model, name)
+                if (old > 0) downloadManager.remove(old)
+                File(modelDirectory, "$name.part").delete()
+                File(modelDirectory, name).delete()
+                prefs.edit().remove("error_$name").remove("verified_$name").apply()
+                val request = DownloadManager.Request(Uri.parse(spec(name).getString("url")))
+                    .setTitle("${model.name}: $name")
+                    .setDescription("Downloading model file; verification follows")
+                    .setAllowedOverRoaming(false)
+                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    .setDestinationInExternalFilesDir(appContext, null, "models/$name.part")
+                if (wifiOnly()) request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI).setAllowedOverMetered(false)
+                else request.setAllowedOverMetered(true)
+                lastId = downloadManager.enqueue(request)
+                prefs.edit().putLong(key(name), lastId).remove("download_${model.id}").apply()
             }
+        } catch (e: Exception) {
+            prefs.edit().putString("error_${model.fileName}", e.message ?: "Could not start download").apply()
+        }
+        return lastId
+    }
+
+    @Synchronized
+    fun cancelDownload(model: OfflineModel) {
+        for (name in files(model)) {
+            epochs[name] = (epochs[name] ?: 0) + 1
+            val id = downloadId(model, name)
+            if (id > 0) downloadManager.remove(id)
+            File(modelDirectory, "$name.part").delete()
+            prefs.edit().remove(key(name)).remove("error_$name").apply()
+        }
+        prefs.edit().remove("download_${model.id}").apply()
+    }
+
+    @Synchronized
+    fun remove(model: OfflineModel) {
+        cancelDownload(model)
+        for (name in files(model)) {
+            File(modelDirectory, name).delete()
+            prefs.edit().remove("verified_$name").apply()
+        }
+        if (selectedId == model.id) {
+            selectedId = null
+            prefs.edit().remove("selected_text_model").apply()
+        }
+    }
+
+    private fun verifyAsync(name: String, file: File) {
+        if (!checking.add(name)) return
+        val epoch = epochs[name] ?: 0
+        scope.launch {
+            try {
+                ModelFileVerifier.verify(file, size(name), spec(name).getString("sha256"))
+                synchronized(this@OfflineModelManager) {
+                    if ((epochs[name] ?: 0) == epoch) {
+                        val finalFile = File(modelDirectory, name)
+                        check(file == finalFile || file.renameTo(finalFile)) { "Could not finalize downloaded model" }
+                        prefs.edit().putString("verified_$name", "${spec(name).getString("sha256")}:${finalFile.lastModified()}")
+                            .remove("error_$name").remove(key(name)).apply()
+                    }
+                }
+            } catch (e: Exception) {
+                synchronized(this@OfflineModelManager) {
+                    if ((epochs[name] ?: 0) == epoch) prefs.edit().putString("error_$name", e.message ?: "Verification failed").apply()
+                }
+            } finally { checking.remove(name) }
+        }
+    }
+
+    private fun assetState(model: OfflineModel, name: String): ModelTransferState {
+        val expected = size(name)
+        if (verified(name)) return ModelTransferState(TransferStatus.INSTALLED, 100, expected, expected)
+        prefs.getString("error_$name", null)?.let { return ModelTransferState(TransferStatus.FAILED, total = expected, message = it) }
+        if (checking.contains(name)) return ModelTransferState(TransferStatus.VERIFYING, 99, expected, expected, message = "Checking SHA-256: $name")
+        val id = downloadId(model, name)
+        if (id > 0) {
+            downloadManager.query(DownloadManager.Query().setFilterById(id)).use { c ->
+                if (c.moveToFirst()) {
+                    val status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                    val bytes = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)).coerceAtLeast(0)
+                    val reason = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
+                    val transfer = when (status) {
+                        DownloadManager.STATUS_PENDING -> TransferStatus.QUEUED
+                        DownloadManager.STATUS_RUNNING -> TransferStatus.DOWNLOADING
+                        DownloadManager.STATUS_PAUSED -> TransferStatus.PAUSED
+                        DownloadManager.STATUS_FAILED -> TransferStatus.FAILED
+                        else -> TransferStatus.VERIFYING
+                    }
+                    if (status != DownloadManager.STATUS_SUCCESSFUL) {
+                        val detail = when {
+                            status == DownloadManager.STATUS_FAILED -> "Download failed (code $reason). Check connection, storage and source availability; tap Retry."
+                            status == DownloadManager.STATUS_PAUSED -> "Paused (code $reason); waiting for network/Wi-Fi."
+                            else -> "Downloading $name"
+                        }
+                        return ModelTransferState(transfer, (bytes * 100 / expected).toInt().coerceIn(0, 99), bytes, expected, reason, detail)
+                    }
+                }
+            }
+        }
+        val part = File(modelDirectory, "$name.part")
+        val old = File(modelDirectory, name)
+        val candidate = if (part.exists()) part else old
+        if (candidate.exists()) {
+            if (candidate.length() != expected) return ModelTransferState(TransferStatus.FAILED, downloaded = candidate.length(), total = expected,
+                message = "Incomplete file: ${candidate.length()} of $expected bytes. Tap Retry.")
+            verifyAsync(name, candidate)
+            return ModelTransferState(TransferStatus.VERIFYING, 99, expected, expected, message = "Checking SHA-256: $name")
+        }
+        return ModelTransferState(TransferStatus.NOT_INSTALLED, total = expected)
+    }
+
+    fun state(model: OfflineModel): ModelTransferState {
+        val parts = files(model).map { assetState(model, it) }
+        val total = parts.sumOf { it.total }
+        val downloaded = parts.sumOf { it.downloaded }
+        val status = when {
+            parts.all { it.status == TransferStatus.INSTALLED } -> TransferStatus.INSTALLED
+            parts.any { it.status == TransferStatus.FAILED } -> TransferStatus.FAILED
+            parts.any { it.status == TransferStatus.DOWNLOADING } -> TransferStatus.DOWNLOADING
+            parts.any { it.status == TransferStatus.VERIFYING } -> TransferStatus.VERIFYING
+            parts.any { it.status == TransferStatus.PAUSED } -> TransferStatus.PAUSED
+            parts.any { it.status == TransferStatus.QUEUED } -> TransferStatus.QUEUED
+            else -> TransferStatus.NOT_INSTALLED
+        }
+        return ModelTransferState(status, if (status == TransferStatus.INSTALLED) 100 else (downloaded * 100 / total).toInt().coerceIn(0,99),
+            downloaded, total, message = parts.firstOrNull { it.status == status }?.message.orEmpty())
     }
 }

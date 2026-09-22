@@ -17,7 +17,7 @@ class LocalLlmEngine(context: Context) {
 
     companion object {
         // Every workflow wraps the same native engine. Hold this through cleanup.
-        private val mutex = Mutex()
+        private val mutex = LocalInferenceGate.mutex
     }
 
     suspend fun generate(

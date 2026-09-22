@@ -20,3 +20,5 @@ rootProject.name = "CoderAbyss"
 include(":app")
 include(":llamaLib")
 include(":whisperLib")
+
+include(":wanLib")

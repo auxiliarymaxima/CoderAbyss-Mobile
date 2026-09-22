@@ -12,9 +12,11 @@ android {
         applicationId = "com.coderabyss.mobile"
         minSdk = 33
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4"
+        versionCode = 5
+        versionName = "0.5"
     }
+
+    defaultConfig { ndk { abiFilters += "arm64-v8a" } }
 
     buildFeatures {
         compose = true
@@ -30,6 +32,7 @@ android {
     }
 
     packaging {
+        jniLibs { useLegacyPackaging = true }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
@@ -37,6 +40,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":wanLib"))
     implementation(project(":llamaLib"))
     implementation(project(":whisperLib"))
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -53,6 +57,8 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    testImplementation("junit:junit:4.13.2")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

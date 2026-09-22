@@ -1,25 +1,43 @@
-# Coder Abyss v0.4
+# Coder Abyss v0.5
 
-**Local AI. Real Creation. A Brighter Tomorrow.**
+Android creation workspace with local text, speech and Wan video generation.
 
-Android creation workspace built with Kotlin and Jetpack Compose.
+## Model downloads
 
-- Tap to Speak in Build App, Create Video, Research Paper and Create Visuals uses an installed Whisper model. Stop recording to append the transcription to the prompt, edit it, then submit explicitly.
-- Build App, Research Paper and Create Visuals each save their own default installed GGUF model under Change Model. Existing global selection seeds a workflow on first use; subsequent workflow choices are independent.
-- Create Video keeps its separate Wan2.1 T2V 1.3B default and the existing Hugging Face / Fal queue and Movies/CoderAbyss save flow. Video requires internet and a Hugging Face token; text generation and transcription run locally.
-- Model Manager has one shared selected text model indicator. This is the global selection, not a claim that the model is resident in memory. Running a text workflow selects its saved model globally without changing other workflow defaults.
-- One process-wide lock serializes local LLM loading, generation and cleanup. Native LLM memory is released after each request, including cancellation and failures.
-- llama.cpp initialization, load, context allocation, prompt and token decode failures surface actionable messages.
+The model manager downloads into `.part` files. A model becomes installed only after the complete byte count and SHA-256 match the pinned manifest. Existing v0.4 files are checked when their model card is displayed; incomplete or damaged files require Retry. Progress includes actual bytes, queued/paused states and a separate verification stage. Retry retains verified Wan components. Cancel stops unfinished components; Remove deletes the entire package.
 
-## Build
+Wan 2.1 T2V 1.3B Q4 includes three downloads totaling 4,891,677,270 bytes (4.89 GB):
 
-Use Java 17, Gradle 8.9, Android SDK 35, NDK 29.0.13113456 and CMake 3.31.6. Initialize submodules with `git submodule update --init --recursive`, then run `gradle assembleDebug bundleRelease --console=plain`. GitHub Actions builds v0.4 APK and AAB artifacts on pushes to main.
+- Wan2.1-T2V-1.3B-Q4_K_M.gguf (982,716,640 bytes)
+- umt5-xxl-encoder-Q4_K_M.gguf (3,655,145,312 bytes)
+- wan_2.1_vae.safetensors (253,815,318 bytes)
 
-## Device regression checks
+`app/src/main/assets/model-manifest.json` pins source revisions, exact sizes and checksums. `python scripts/update-model-manifest.py` deliberately refreshes the manifest from Hugging Face metadata. Model files are downloaded separately, not included in the APK.
 
-1. Install Whisper and two text GGUF models. In each of the four workflows, dictate into a nonempty prompt. Confirm existing text remains, the transcript can be edited, and no request runs until submission. Check permission denial, silence, navigation while recording and transcription failure.
-2. Choose different defaults for Build App, Research Paper and Create Visuals. Navigate away, restart the app and verify each choice persists. Video must still show Wan. Removing a saved text model must require choosing an installed replacement.
-3. In Model Manager select text model A, then B: only B is selected. Run a workflow with A: only A becomes globally selected, with other workflow defaults unchanged.
-4. Start a long generation, stop or navigate away, then start another workflow using a different model. Verify native cleanup completes before the next load and no overlapping models remain in memory.
-5. Try an invalid GGUF and an oversized prompt. Confirm useful errors, then successfully run a valid model. Test a compatible APK on a device with limited memory for allocation errors.
-6. Submit an edited video prompt with a valid token. Confirm Wan queue progress, video playback and saving to Movies/CoderAbyss still work.
+## Create Video
+
+On-device is the default. After the full Wan package is verified, prompts run through a pinned stable-diffusion.cpp CPU runtime via JNI. Internet and provider tokens are not needed for local generation. Choose a low-resolution 17, 33 or 49 frame clip at 16 fps. Results are silent H.264 MP4 files encoded with Android MediaCodec. This is real model inference, not a slideshow or server call.
+
+Hosted Wan through Hugging Face/Fal remains optional. The video screen remembers the selected mode and local preset. Both modes produce a private cached preview with Play and Save MP4 buttons. Save copies the video into Movies/CoderAbyss; generation itself does not publish to the gallery. The last preview is restored while its cache file exists.
+
+CPU video generation can be very slow and uses substantial RAM. More capable hardware does not guarantee success: Android may terminate the process under memory pressure. No on-device performance or quality claim is made. Keep the video screen open during generation; leaving cancels it. Cancellation during model loading waits for that load to return. Text LLM, Whisper and Wan share a process-wide inference gate; native resources are freed before another operation starts.
+
+Build App, Research Paper and Create Visuals preserve their independent default text models. Tap to Speak appends local Whisper transcription to the editable prompt; submission is always explicit.
+
+## Build and verification
+
+Java 17, Gradle 8.9, Android SDK 35, NDK 29.0.13113456 and CMake 3.31.6 are required. Initialize submodules recursively, then run `gradle :app:testDebugUnitTest assembleDebug bundleRelease --console=plain`. The APK targets ARM64 Android 13+.
+
+GitHub Actions verifies the APK signature and ZIP alignment and publishes the APK with its SHA-256 and exact size. The download regression checks reject truncated files, corruption with unchanged file size, and partial files larger than the old 1 MB threshold. Building successfully does not establish device video performance.
+
+## Manual checks when a device is available
+
+- Start a large download and confirm it remains downloading after 1 MB. Pause Wi-Fi, resume, cancel and retry; restart the app mid-download. Confirm a file is usable only after verification.
+- Verify an old v0.4 file; confirm a partial/corrupt one fails and a complete valid one is retained.
+- Complete all three Wan files, disconnect the network, generate a local clip, preview it, then save to the gallery as MP4.
+- Cancel during loading/sampling and switch to a text workflow; verify cleanup before the next model starts.
+- Generate with hosted Wan and verify the same preview/save behavior. Denied tokens and failed downloads must display errors.
+
+## Runtime and model sources
+
+The native video runtime is [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) (MIT), statically linked with a private GGML copy to avoid collisions with llama.cpp. Public Wan weights originate from [Wan2.1](https://github.com/Wan-Video/Wan2.1) (Apache-2.0); the manifest names the quantized/repackaged distribution sources. Bundled runtime license notices are in `app/src/main/assets/wan-runtime-licenses.txt`.

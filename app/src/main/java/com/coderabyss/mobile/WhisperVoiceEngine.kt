@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlinx.coroutines.sync.withLock
 
 class WhisperVoiceEngine {
 
@@ -197,11 +198,13 @@ class WhisperVoiceEngine {
             Dispatchers.IO
         ) {
 
+            LocalInferenceGate.mutex.withLock {
             val whisper = WhisperContext.createContextFromFile(model.absolutePath)
             try {
                 whisper.transcribeData(audio, printTimestamp = false).trim()
             } finally {
                 withContext(kotlinx.coroutines.NonCancellable) { whisper.release() }
+            }
             }
         }
     }
