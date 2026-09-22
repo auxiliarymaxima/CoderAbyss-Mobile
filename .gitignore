@@ -4,6 +4,8 @@ local.properties
 *.iml
 /build/
 /app/build/
+**/build/
+.codex-remote-attachments/
 captures/
 .externalNativeBuild/
 .cxx/

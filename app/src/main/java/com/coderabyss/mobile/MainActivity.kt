@@ -95,6 +95,7 @@ class MainActivity :
         savedInstanceState: Bundle?
     ) {
         super.onCreate(savedInstanceState)
+        VideoTasks(applicationContext).recover()
 
         setContent {
 
@@ -137,6 +138,39 @@ private fun CoderAbyssApp() {
         )
     }
 
+    var selectedVideoProject by remember { mutableStateOf<String?>(null) }
+    var experimentalVideo by remember { mutableStateOf(false) }
+    var videoTasks by remember { mutableStateOf(VideoTasks(context).all()) }
+    var showTasks by remember { mutableStateOf(false) }
+    var downloads by remember { mutableStateOf(emptyList<Pair<OfflineModel, ModelTransferState>>()) }
+    LaunchedEffect(Unit) { while (true) {
+        videoTasks = VideoTasks(context).all()
+        downloads = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            ModelCatalog.models.map { it to modelManager.state(it) }.filter { (_, state) ->
+                state.status in setOf(TransferStatus.QUEUED, TransferStatus.DOWNLOADING, TransferStatus.PAUSED, TransferStatus.VERIFYING)
+            }
+        }
+        delay(2000)
+    } }
+    if (showTasks) AlertDialog(onDismissRequest = { showTasks = false }, title = { Text("Tasks") }, text = {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            videoTasks.filter { it.optString("status") !in VideoTasks.finished }.forEach { task ->
+                val elapsed = ((System.currentTimeMillis() - task.getLong("createdAt")) / 1000).coerceAtLeast(0)
+                TextButton(onClick = {
+                    selectedVideoProject = task.getString("projectId")
+                    experimentalVideo = task.optString("backend") == "local-wan"
+                    feature = FeatureType.VIDEO; page = AppPage.FEATURE; showTasks = false
+                }) { Text("${task.getJSONObject("request").optString("engine").uppercase()} Video · ${elapsed / 60}:${(elapsed % 60).toString().padStart(2, '0')}\n${task.optString("stage")}") }
+            }
+            downloads.forEach { (model, state) ->
+                TextButton(onClick = { page = AppPage.MODELS; showTasks = false }) {
+                    Text("${model.name} · ${state.progress}%\n${state.status}")
+                }
+            }
+            if (videoTasks.none { it.optString("status") !in VideoTasks.finished } && downloads.isEmpty()) Text("No active tasks")
+        }
+    }, confirmButton = { TextButton(onClick = { showTasks = false }) { Text("Close") } })
+
     val selectedBottom =
         when (page) {
 
@@ -149,6 +183,10 @@ private fun CoderAbyssApp() {
 
     Scaffold(
         containerColor = AbyssBlack,
+        topBar = {
+            val active = videoTasks.count { it.optString("status") !in VideoTasks.finished } + downloads.size
+            if (videoTasks.isNotEmpty() || downloads.isNotEmpty()) TextButton(onClick = { showTasks = true }) { Text("Tasks · $active") }
+        },
 
         bottomBar = {
 
@@ -204,6 +242,8 @@ private fun CoderAbyssApp() {
 
                         onFeature = {
                             feature = it
+                            selectedVideoProject = null
+                            experimentalVideo = false
                             page =
                                 AppPage.FEATURE
                         }
@@ -221,35 +261,26 @@ private fun CoderAbyssApp() {
                         }
                     )
 
-                AppPage.FEATURE ->
-
-                    FeatureWorkspace(
-                        feature =
-                            feature,
-
-                        manager =
-                            modelManager,
-
-                        onBack = {
-                            page =
-                                AppPage.HOME
-                        },
-
-                        onModels = {
-                            page =
-                                AppPage.MODELS
-                        }
-                    )
-
-                AppPage.PROJECTS ->
-
-                    PlaceholderScreen(
-                        title = "Projects",
-                        icon =
-                            Icons.Rounded.Folder,
-                        subtitle =
-                            "Your local Coder Abyss projects will live here."
-                    )
+                AppPage.FEATURE -> {
+                    if (feature == FeatureType.VIDEO) {
+                        RemoteVideoWorkspace(selectedVideoProject, experimental = experimentalVideo,
+                            onBack = { page = AppPage.HOME },
+                            onSettings = { page = AppPage.SETTINGS },
+                            onExperimental = { selectedVideoProject = null; experimentalVideo = true },
+                            voice = { busy, insert -> PromptVoiceInput(modelManager,
+                                onModels = { page = AppPage.MODELS }, enabled = true, onBusy = busy, onTranscript = insert) })
+                    } else {
+                        FeatureWorkspace(feature = feature, manager = modelManager,
+                            onBack = { experimentalVideo = false; page = AppPage.HOME },
+                            onModels = { page = AppPage.MODELS })
+                    }
+                }
+                AppPage.PROJECTS -> VideoProjectsScreen { id ->
+                    selectedVideoProject = id
+                    experimentalVideo = VideoTasks(context).read(id).optString("backend") == "local-wan"
+                    feature = FeatureType.VIDEO
+                    page = AppPage.FEATURE
+                }
 
                 AppPage.LIBRARY ->
 
@@ -1243,6 +1274,12 @@ private fun ModelManagerScreen(
             "Install, select and remove local AI models.",
             onBack
         )
+
+        Text("GPU backend models", color = AbyssBlue)
+        VideoModelCatalog.models(LocalContext.current).forEach { model ->
+            Text("${model.title} · Hosted GPU", color = AbyssText)
+            Text(if (model.available) "Available on GPU Backend" else "Configure Backend in Settings", color = AbyssMuted)
+        }
 
         Spacer(
             Modifier.height(18.dp)
@@ -2299,6 +2336,8 @@ private fun SettingsScreen(
                 .padding(18.dp)
     ) {
 
+        VideoBackendSettingsPanel()
+        Spacer(Modifier.height(18.dp))
         Text(
             "Settings",
             color =

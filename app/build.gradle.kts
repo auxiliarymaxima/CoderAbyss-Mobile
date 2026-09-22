@@ -7,13 +7,14 @@ plugins {
 android {
     namespace = "com.coderabyss.mobile"
     compileSdk = 35
+    ndkVersion = "29.0.13113456"
 
     defaultConfig {
         applicationId = "com.coderabyss.mobile"
         minSdk = 33
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5"
+        versionCode = 6
+        versionName = "0.6"
     }
 
     defaultConfig { ndk { abiFilters += "arm64-v8a" } }
@@ -40,6 +41,7 @@ android {
 }
 
 dependencies {
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation(project(":wanLib"))
     implementation(project(":llamaLib"))
     implementation(project(":whisperLib"))

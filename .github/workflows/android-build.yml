@@ -74,7 +74,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Coder-Abyss-APK-v0.5
+          name: Coder-Abyss-APK-v0.6
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/debug/app-debug.apk.sha256
@@ -83,5 +83,5 @@ jobs:
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Coder-Abyss-AAB-v0.5
+          name: Coder-Abyss-AAB-v0.6
           path: app/build/outputs/bundle/release/app-release.aab

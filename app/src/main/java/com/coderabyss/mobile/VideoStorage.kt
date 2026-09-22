@@ -9,11 +9,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 object VideoStorage {
-    suspend fun save(context: Context, preview: File): Uri = withContext(Dispatchers.IO) {
+    suspend fun save(context: Context, preview: File, title: String? = null): Uri = withContext(Dispatchers.IO) {
         check(preview.isFile && preview.length() > 0) { "Preview file is missing. Generate a video first." }
         val resolver = context.contentResolver
         val values = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "coder_abyss_${System.currentTimeMillis()}.mp4")
+            val safeTitle = title?.replace(Regex("[^\\p{L}\\p{N} _-]"), "_")?.trim()?.take(80)?.takeIf { it.isNotBlank() }
+            put(MediaStore.Video.Media.DISPLAY_NAME, "${safeTitle ?: "coder_abyss"}_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/CoderAbyss")
             put(MediaStore.Video.Media.IS_PENDING, 1)

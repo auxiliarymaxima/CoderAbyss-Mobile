@@ -1,6 +1,6 @@
-# Coder Abyss v0.5
+# Coder Abyss v0.6
 
-Android creation workspace with local text, speech and Wan video generation.
+Android creation workspace with local text/speech and a private GPU video backend.
 
 ## Model downloads
 
@@ -16,11 +16,55 @@ Wan 2.1 T2V 1.3B Q4 includes three downloads totaling 4,891,677,270 bytes (4.89 
 
 ## Create Video
 
-On-device is the default. After the full Wan package is verified, prompts run through a pinned stable-diffusion.cpp CPU runtime via JNI. Internet and provider tokens are not needed for local generation. Choose a low-resolution 17, 33 or 49 frame clip at 16 fps. Results are silent H.264 MP4 files encoded with Android MediaCodec. This is real model inference, not a slideshow or server call.
+Video defaults to the private Gradio/ZeroGPU Space `andrewmonize/Coder-Abyss-Space`.
+In Settings → Video Backend, configure a Hugging Face credential with access to
+that private Space, then Test Connection. Credentials are encrypted with an
+Android Keystore AES-GCM key and stored in the app's no-backup directory. They are
+never embedded in the APK, project files, BuildConfig or source control. No backend
+secret is required for the public model downloads. For distribution, each user
+needs authorized access or an authenticated intermediary; the owner's personal
+token must never be bundled. Prompts and generated videos are processed on the
+remote Space when hosted generation is enabled.
 
-Hosted Wan through Hugging Face/Fal remains optional. The video screen remembers the selected mode and local preset. Both modes produce a private cached preview with Play and Save MP4 buttons. Save copies the video into Movies/CoderAbyss; generation itself does not publish to the gallery. The last preview is restored while its cache file exists.
+QUICK uses Wan 1.3B with a live 100-word limit. Whisper appends editable text;
+generation is disabled above the limit, without truncation. LONG uses LTX 13B
+distilled with conditioned five-second segments. The backend has generated and
+validated 15- and 60-second 320x192 MP4s. The 30/45-second options use the same
+segment assembly. This is continuation, not native minute-long generation;
+continuity is not guaranteed. The 60-second test required explicit retries after
+GPU allocation failures. Other Wan presets are implemented but only one-second
+256x256 was exercised on the live deployment.
 
-CPU video generation can be very slow and uses substantial RAM. More capable hardware does not guarantee success: Android may terminate the process under memory pressure. No on-device performance or quality claim is made. Keep the video screen open during generation; leaving cancels it. Cancellation during model loading waits for that load to return. Text LLM, Whisper and Wan share a process-wide inference gate; native resources are freed before another operation starts.
+Create Video queries the backend's capabilities. GPU-only recommendations say
+Available on GPU Backend; they are not phone downloads. Existing phone-local Wan
+remains an optional **Experimental — Very Slow on Mobile** mode, using the pinned
+stable-diffusion.cpp runtime. Local text, Whisper and local Wan share the existing
+native inference gate. The phone-local model package remains in AI Models.
+
+Projects are stored under the app-private `Projects/Videos/<UUID>/` directory,
+with `project.json`, prompts, jobs, generations, renders and exports folders.
+WorkManager owns execution/tracking; Compose only observes persisted records.
+Navigation, screen changes and process recreation do not resubmit remote jobs.
+An uncertain submission is looked up by its original client request ID. Network
+recovery checks the same backend job. Retry Download only retrieves the existing
+result; explicit generation retry resumes saved LTX segments when available.
+
+Space storage is currently ephemeral. A Space rebuild can remove backend jobs
+and results. The phone retains its metadata and shows an unknown/restarted job;
+it never silently creates another generation. Configure `CODER_ABYSS_DATA_DIR`
+on an attached persistent volume to retain backend files across restarts.
+Android background scheduling is subject to OS delays. Experimental local
+inference uses a foreground worker; process death interrupts local computation
+and requires an explicit new generation.
+
+Results download through partial files with HTTP Range support, byte count and
+Android media validation before completion. Preview supports playback/replay,
+Save MP4 to Movies/CoderAbyss, Share, Rename, Delete, and a variation/regeneration
+prompt. Each new generation currently creates its own video project.
+
+**Local Only** blocks hosted submission, status checks, diagnostics and result
+downloads. Existing local videos remain playable/exportable. It does not cancel
+an already-running GPU job remotely; tracking resumes after Local Only is off.
 
 Build App, Research Paper and Create Visuals preserve their independent default text models. Tap to Speak appends local Whisper transcription to the editable prompt; submission is always explicit.
 
@@ -36,7 +80,17 @@ GitHub Actions verifies the APK signature and ZIP alignment and publishes the AP
 - Verify an old v0.4 file; confirm a partial/corrupt one fails and a complete valid one is retained.
 - Complete all three Wan files, disconnect the network, generate a local clip, preview it, then save to the gallery as MP4.
 - Cancel during loading/sampling and switch to a text workflow; verify cleanup before the next model starts.
-- Generate with hosted Wan and verify the same preview/save behavior. Denied tokens and failed downloads must display errors.
+- Configure Video Backend, Test Connection, generate QUICK at 1 second / 256x256.
+- Navigate to Projects, switch Android apps, then restart Coder Abyss: confirm the same job ID remains.
+- Disconnect/reconnect internet and confirm no duplicate generation; retry a failed download only.
+- Paste 101 Wan words, confirm Generate disables, shorten to 100 and confirm it enables.
+- Enable Local Only: hosted calls stop while saved videos still play and export.
+- Preview, share, save and reopen the completed project. Then try LONG at 15 seconds.
+
+Backend CUDA, Wan and LTX tests ran against real ZeroGPU hardware. All eight Android unit tests, debug APK and release AAB builds passed. APK
+signature and 16KB ZIP/ELF alignment passed. Android phone
+navigation/process-death/network/preview checks require a connected device and
+are not claimed as completed by a desktop build.
 
 ## Runtime and model sources
 

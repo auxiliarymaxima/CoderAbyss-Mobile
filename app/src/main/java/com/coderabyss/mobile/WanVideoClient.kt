@@ -25,6 +25,10 @@ class WanVideoClient(
 
     private val client =
         OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                VideoBackendSettings(context).requireRemoteAllowed()
+                chain.proceed(chain.request())
+            }
             .connectTimeout(
                 30,
                 TimeUnit.SECONDS
@@ -48,6 +52,8 @@ class WanVideoClient(
         withContext(
             Dispatchers.IO
         ) {
+
+            VideoPromptRules.validateWan(prompt)
 
             require(
                 hfToken.startsWith(
