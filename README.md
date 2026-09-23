@@ -161,7 +161,7 @@ media exports still require physical-device acceptance testing.
 
 ## Build and verification
 
-Use Java 17, Gradle 8.9, Android SDK 35, NDK 29.0.13113456 and CMake 3.31.6.
+Use Java 17, Gradle 8.11.1, Android SDK 36 (native modules also use SDK 35), NDK 29.0.13113456 and CMake 3.31.6.
 Initialize submodules recursively, then run:
 
 ```text
@@ -172,7 +172,7 @@ Tests cover model corruption, prompt limits, routing, Office package structure,
 embedded assets, project migration, managed copy isolation, durable job identity
 and Local Only blocking. Android behavior tests use
 [Robolectric 4.14](https://robolectric.org/compatibility_table/), compatible with
-API 34/35 and this Java toolchain. DOCX/PPTX/XLSX packages were additionally opened
+the API 34 test configuration and this Java toolchain. DOCX/PPTX/XLSX packages were additionally opened
 by independent Python Office readers. Historical v0.7 direct-Space GPU tests generated and downloaded
 an SDXL PNG and both Qwen text outputs; no sample output substitutes generation.
 

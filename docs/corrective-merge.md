@@ -5,11 +5,12 @@
 Repair branch: `fix/v07-v06-ui-auth-subscriptions-branding`.
 Functional base: `6380193aef2b87d58feee667ca1bcd9c8789a5ae`.
 Visual contract: `d2bf748ab8c32f1d0c855c9c43d8ca48936d1480`.
-Android versionCode **8**, versionName **0.7.1**.
+Android versionCode **8**, versionName **0.7.1**, compile/target SDK **36**.
+Build tools: AGP 8.9.2, Gradle 8.11.1, Java 17. Native revisions are unchanged.
 
 This is a buildable integration candidate, **not a deployed subscription product**.
-Google project IDs, OAuth/Firebase app configuration, Play product IDs/service
-permissions, Cloud Run deployment and Secret Manager provisioning were unavailable.
+The owner confirmed Google/Firebase/Play are not configured yet and requested
+implementation plus setup documentation. No paid infrastructure was provisioned.
 Normal cloud access fails closed until configured. The repair is delivered on its
 branch; main stays unchanged pending deployment configuration and phone acceptance.
 The delivery message records the exact commit, push and CI result.
@@ -123,7 +124,7 @@ Physical circle/squircle/round, themed icon, Recent Apps and splash checks remai
 ## Verification
 
 - Android unit tests: **19 passed** (including gateway Local Only/fail-closed tests).
-- Gateway tests: **13 passed**, covering authorization matrix, subscription states,
+- Gateway tests: **15 passed**, covering authorization matrix, subscription states,
   purchase association, client privilege rejection, secret-safe validation, recent
   auth, invalid rotation and emergency version behavior. These use isolated test
   fakes; **no live Google purchase or deployed secret rotation was claimed**.
@@ -134,9 +135,9 @@ Physical circle/squircle/round, themed icon, Recent Apps and splash checks remai
   Whisper 12, Wan 4. No native gitlink revisions changed.
 - APK credential-pattern scan passed for HF token, private-key and service-account
   payload patterns. This is defense in depth, not proof against every encoding.
-- Local debug APK: **95,442,508 bytes**; SHA256
-  `db4799ff147bb66c307564f9e667a1cbdf8e7743e3c407b2e5b2371b9cd75fe5`.
-  Local release AAB: **66,618,992 bytes**. CI artifacts have their own checksums.
+- Local debug APK: **94,818,668 bytes**; SHA256
+  `76cece18894721893cc6477a4edf95b5368121745e93b837b71021771a192c34`.
+  CI artifacts have their own checksums.
 - Existing live Space generation evidence belongs to v0.7; gateway-mediated live
   generation has not yet been tested without deployment.
 
@@ -219,3 +220,18 @@ storage limitations remain unchanged.
 - `gateway/tests/test_policy.py` — added
 - `gateway/tests/test_security.py` — added
 - `scripts/verify-apk-secrets.py` — added
+
+## API 36 follow-up
+
+Current Google Play submission policy requires API 36. The corrective follow-up
+updates compile/target SDK to 36, AGP to 8.9.2 and Gradle to 8.11.1, retains native
+module pins, and adds explicit status-bar insets for the restored shell. The
+credential replacement field requests password input with autocorrect disabled.
+The API 36 run passed all required tasks: 19 Android tests, debug lint, debug APK
+and release AAB. Signature, ARM64/16 KB checks and credential-pattern scan passed
+on the API 36 APK. The checksum above is for that final local APK.
+
+Policy reference: https://developer.android.com/google/play/requirements/target-sdk
+Toolchain reference: https://developer.android.com/build/releases/about-agp
+
+Final local API 36 AAB size: 66559246 bytes.

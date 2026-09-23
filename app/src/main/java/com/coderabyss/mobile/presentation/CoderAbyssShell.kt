@@ -58,7 +58,9 @@ fun CoderAbyssShell(vm: WorkspaceViewModel = viewModel()) {
         }; return
     }
     Scaffold(containerColor = AbyssBlack, topBar = {
-        if(tasks.isNotEmpty()) TextButton(onClick = { showTasks = true }) { Text("Tasks · ${tasks.count { it.optString("status") !in PersistentTaskStore.terminal }}") }
+        Column(Modifier.statusBarsPadding()) {
+            if(tasks.isNotEmpty()) TextButton(onClick = { showTasks = true }) { Text("Tasks · ${tasks.count { it.optString("status") !in PersistentTaskStore.terminal }}") }
+        }
     }, bottomBar = { AbyssBottomBar(listOf("Home", "Projects", "Models", "Settings").indexOf(page)) { page = listOf("Home", "Projects", "Models", "Settings")[it] } }) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).background(Brush.verticalGradient(listOf(AbyssBlack, AbyssPanel, AbyssBlack)))) {
             when(page) {

@@ -6,13 +6,13 @@ plugins {
 
 android {
     namespace = "com.coderabyss.mobile"
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = "29.0.13113456"
 
     defaultConfig {
         applicationId = "com.coderabyss.mobile"
         minSdk = 33
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 8
         versionName = "0.7.1"
         // Public application identifiers only. No service credentials belong here.

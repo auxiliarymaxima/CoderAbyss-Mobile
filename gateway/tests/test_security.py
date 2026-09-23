@@ -74,6 +74,25 @@ class SecurityTests(unittest.TestCase):
         gateway.app.dependency_overrides[gateway.identity] = lambda: {"uid": "owner", "role": "OWNER", "auth_time": 0}
         self.assertEqual(self.client.post("/admin/provider/credential/rotate", json={"credential": "unit-test-secret-only"}).status_code, 401)
 
+    def test_standard_rotation_keeps_only_safe_previous_version(self):
+        self.user("OWNER")
+        old = {"space": "owner/test", "version": "old"}
+        secret = MagicMock(); secret.add_secret_version.return_value.name = "new-version"
+        with patch.dict("os.environ", {"CODER_ABYSS_HF_SECRET": "projects/test/secrets/provider", "CODER_ABYSS_ROLLBACK_SECONDS": "300"}), patch.object(gateway, "config", return_value=old), patch.object(gateway, "Provider"), patch.object(gateway, "secrets", return_value=secret), patch.object(gateway, "replace_config") as replace:
+            response = self.client.post("/admin/provider/credential/rotate", json={"credential": "unit-test-secret-only"})
+            self.assertEqual(response.status_code, 200)
+            active = replace.call_args.args[1]
+            self.assertEqual(active["previous"], "old")
+            self.assertGreater(active["rollbackUntil"], time.time())
+            self.assertNotIn("unit-test-secret-only", str(active))
+            secret.disable_secret_version.assert_not_called()
+
+    def test_expired_rollback_cannot_access_secret(self):
+        self.user("OWNER")
+        with patch.object(gateway, "config", return_value={"previous": "old", "rollbackUntil": 0}), patch.object(gateway, "secrets") as secrets:
+            self.assertEqual(self.client.post("/admin/provider/credential/rollback", json={}).status_code, 409)
+            secrets.assert_not_called()
+
     def test_gradio_engine_contracts(self):
         base = {"clientRequestId": "00000000-0000-0000-0000-000000000001", "prompt": "test"}
         for engine, fields in (("wan", {"duration", "resolution", "aspectRatio"}), ("ltx", {"duration", "resolution", "aspectRatio"}), ("sdxl", {"negativePrompt", "resolution", "seed"}), ("qwen-coder", {"systemPrompt", "maxTokens"})):

@@ -77,7 +77,8 @@ private fun AdministrationPanel(role: AccountRole) {
             TextButton(onClick = { request("admin/provider/test", JSONObject()) }) { Text("Test Backend") }
             OutlinedTextField(newSpace, { newSpace = it }, label = { Text("New Space owner/name") })
             TextButton(onClick = { request("admin/provider/space", JSONObject().put("space", newSpace)) }) { Text("Change Space") }
-            OutlinedTextField(secret, { secret = it }, label = { Text("New credential (write only)") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+            OutlinedTextField(secret, { secret = it }, label = { Text("New credential (write only)") }, visualTransformation = PasswordVisualTransformation(), singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, autoCorrectEnabled = false))
             Text("Existing credentials cannot be retrieved. The new value is cleared after the request.", style = MaterialTheme.typography.bodySmall)
             Row {
                 TextButton(enabled = secret.isNotBlank() && !busy, onClick = { confirm = "rotate" }) { Text("Rotate") }
