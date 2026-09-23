@@ -1,97 +1,162 @@
-# Coder Abyss v0.6
+# Coder Abyss v0.7
 
-Android creation workspace with local text/speech and a private GPU video backend.
+Android creation workspaces with small local AI models and a private Hugging Face
+GPU backend. The APK targets ARM64 Android 13+ (versionCode 7).
 
-## Model downloads
+## What runs where
 
-The model manager downloads into `.part` files. A model becomes installed only after the complete byte count and SHA-256 match the pinned manifest. Existing v0.4 files are checked when their model card is displayed; incomplete or damaged files require Retry. Progress includes actual bytes, queued/paused states and a separate verification stage. Retry retains verified Wan components. Cancel stops unfinished components; Remove deletes the entire package.
+| Service | On device | Cloud GPU |
+| --- | --- | --- |
+| AI Companion | LFM2.5-1.2B Q4; other compatible installed text models | Qwen 2.5 7B |
+| Build an App | Qwen Coder 1.5B / 3B Q4, subject to available RAM | Qwen Coder 2.5 7B |
+| Research Paper | Compatible installed text models | Qwen 2.5 7B |
+| Speech | Whisper Tiny / Base | None |
+| Create Visuals | Editing, preview and export | SDXL 1.0 |
+| Create Video | Preview and export | QUICK: Wan 1.3B; LONG: LTX 13B distilled |
 
-Wan 2.1 T2V 1.3B Q4 includes three downloads totaling 4,891,677,270 bytes (4.89 GB):
+`models/ModelRegistry.kt` is the shared metadata source for AI Models and every
+service selector. Services and individual projects remember their own model.
+One shared native mutex permits only one text LLM at a time. Whisper has a
+separate gate and may coexist with text inference when memory permits.
+Available RAM, total RAM, ABI, storage and thermal status inform compatibility.
+These are estimates, not device performance guarantees. LFM uses the
+[LFM Open License](https://www.liquid.ai/pricing), including commercial revenue
+conditions; individual model cards identify their licenses/sources.
 
-- Wan2.1-T2V-1.3B-Q4_K_M.gguf (982,716,640 bytes)
-- umt5-xxl-encoder-Q4_K_M.gguf (3,655,145,312 bytes)
-- wan_2.1_vae.safetensors (253,815,318 bytes)
+Wan/LTX/image weights cannot be downloaded or executed through the Android UI.
+Legacy local-Wan weights remain removable and existing videos remain usable.
+Native module revisions are preserved for build compatibility; the phone-local
+video execution path is disabled.
 
-`app/src/main/assets/model-manifest.json` pins source revisions, exact sizes and checksums. `python scripts/update-model-manifest.py` deliberately refreshes the manifest from Hugging Face metadata. Model files are downloaded separately, not included in the APK.
+## One provider configuration
 
-## Create Video
+Open **Settings → AI Provider / Video Backend**. Default Space:
+`andrewmonize/Coder-Abyss-Space`. Save a credential authorized to access that
+private Space once, then **Test Backend**. It is reused across all hosted
+services. Android Keystore AES-GCM protects it in the no-backup directory. Tokens
+never enter project metadata, source, BuildConfig, logs or APK resources.
 
-Video defaults to the private Gradio/ZeroGPU Space `andrewmonize/Coder-Abyss-Space`.
-In Settings → Video Backend, configure a Hugging Face credential with access to
-that private Space, then Test Connection. Credentials are encrypted with an
-Android Keystore AES-GCM key and stored in the app's no-backup directory. They are
-never embedded in the APK, project files, BuildConfig or source control. No backend
-secret is required for the public model downloads. For distribution, each user
-needs authorized access or an authenticated intermediary; the owner's personal
-token must never be bundled. Prompts and generated videos are processed on the
-remote Space when hosted generation is enabled.
+Direct private-Space access is a development/user-owned-provider configuration.
+A distributed product needs user-specific authorization or an authenticated
+gateway; an owner's personal token must never be bundled. No new Space Secret
+is required for the currently public model weights. Optional persistent backend
+storage uses the variable `CODER_ABYSS_DATA_DIR` pointing to an attached volume.
 
-QUICK uses Wan 1.3B with a live 100-word limit. Whisper appends editable text;
-generation is disabled above the limit, without truncation. LONG uses LTX 13B
-distilled with conditioned five-second segments. The backend has generated and
-validated 15- and 60-second 320x192 MP4s. The 30/45-second options use the same
-segment assembly. This is continuation, not native minute-long generation;
-continuity is not guaranteed. The 60-second test required explicit retries after
-GPU allocation failures. Other Wan presets are implemented but only one-second
-256x256 was exercised on the live deployment.
+The Space selector permits another compatible primary/user-owned Space. Each
+submitted task pins its original Space; changing settings never migrates a
+running job. Provider state distinguishes ready, starting, rate-limited,
+authentication-required and offline responses. There is no silent fallback.
 
-Create Video queries the backend's capabilities. GPU-only recommendations say
-Available on GPU Backend; they are not phone downloads. Existing phone-local Wan
-remains an optional **Experimental — Very Slow on Mobile** mode, using the pinned
-stable-diffusion.cpp runtime. Local text, Whisper and local Wan share the existing
-native inference gate. The phone-local model package remains in AI Models.
+Hosted prompts/results are processed remotely. **Local Only** blocks hosted
+submission, polling, result downloads, provider tests, web source lookup and new
+model downloads. Local text, speech, editing, projects and local exports remain
+available. It cannot cancel an already-running server job without making a
+network request; tracking resumes after it is disabled.
 
-Projects are stored under the app-private `Projects/Videos/<UUID>/` directory,
-with `project.json`, prompts, jobs, generations, renders and exports folders.
-WorkManager owns execution/tracking; Compose only observes persisted records.
-Navigation, screen changes and process recreation do not resubmit remote jobs.
-An uncertain submission is looked up by its original client request ID. Network
-recovery checks the same backend job. Retry Download only retrieves the existing
-result; explicit generation retry resumes saved LTX segments when available.
+## Persistent projects and operations
 
-Space storage is currently ephemeral. A Space rebuild can remove backend jobs
-and results. The phone retains its metadata and shows an unknown/restarted job;
-it never silently creates another generation. Configure `CODER_ABYSS_DATA_DIR`
-on an attached persistent volume to retain backend files across restarts.
-Android background scheduling is subject to OS delays. Experimental local
-inference uses a foreground worker; process death interrupts local computation
-and requires an explicit new generation.
+Projects live in app-private `Projects/{Apps,Videos,Research,Visuals,Companion}/UUID`.
+They contain metadata, prompts, sections/sources, outputs, assets, exports,
+source files and saved versions. Legacy video projects migrate in place without
+changing backend job IDs. Rename, duplicate, deletion and draft restoration are
+available. Restoring a draft does not resubmit generation or remove outputs.
+Managed cross-project assets are copies; deleting an original cannot break them.
+Source ZIP exports include managed non-audio assets.
 
-Results download through partial files with HTTP Range support, byte count and
-Android media validation before completion. Preview supports playback/replay,
-Save MP4 to Movies/CoderAbyss, Share, Rename, Delete, and a variation/regeneration
-prompt. Each new generation currently creates its own video project.
+`tasks/TaskManager`, `PersistentTaskStore` and `PlatformTaskWorker` own execution.
+Compose observes repository flows; Activity/navigation do not own generation.
+Inputs and a client request ID are persisted before submission. Remote job IDs
+are saved immediately. Recovery queries the same job. Uncertain submissions are
+looked up by request ID and never blindly resubmitted. Explicit retry of a failed
+backend job preserves its identity; download retry retrieves the same result.
+The global Tasks view includes stages, elapsed time, real byte counts, diagnostics,
+cancellation, retries and saved partial text. Video displays its real stage trail.
+Only actual backend text token metrics and diffusion progress are shown.
 
-**Local Only** blocks hosted submission, status checks, diagnostics and result
-downloads. Existing local videos remain playable/exportable. It does not cancel
-an already-running GPU job remotely; tracking resumes after Local Only is off.
+Local text uses a foreground worker and saves partial output. Process death
+interrupts local computation; Continue/Retry is explicit. Microphone capture uses
+a foreground service, writes PCM locally, then queues Whisper. Dictation is added
+to the editable project prompt and never triggers generation automatically.
+Android scheduling/battery policies can delay tracking; a force-stop prevents
+background work until the app is opened again.
 
-Build App, Research Paper and Create Visuals preserve their independent default text models. Tap to Speak appends local Whisper transcription to the editable prompt; submission is always explicit.
+New model transfers use one resumable worker behind the existing model manager.
+Pause retains bytes; Resume uses HTTP Range where supported. Full pinned size and
+SHA-256 verification is mandatory before automatic installation. Cancel removes
+the incomplete transfer. Existing OS DownloadManager transfers remain visible
+until finished/cancelled. Local Only stops those legacy transfers; they may need
+restarting. `model-manifest.json` pins revisions, sizes and checksums.
+
+## Research, visuals and video
+
+Research provides persistent metadata, editable/reorderable sections, individual
+Generate/Expand/Rewrite/Continue, manual sources, optional real Crossref lookup,
+source notes, section citation links, findings/data rows, preview and export.
+Crossref results are bibliographic metadata/available abstracts, not verified
+full-text evidence. Generated prose remains an AI draft. Citation formatting
+helpers cover APA/MLA/Chicago/Harvard/IEEE from saved fields; review scholarly
+formatting and original claims before publication. No missing author/date/DOI
+is invented. Numeric findings with a shared unit can produce a local chart.
+
+DOCX, PPTX and XLSX are genuine Office Open XML ZIP packages. PDF contains real
+text pages. PPTX creates a concise section summary; XLSX contains structured
+sources/findings rather than a pasted essay. Managed images/charts embed in
+DOCX/PDF/PPTX. Images are bounded to 2048 pixels for document memory use; original
+project images are retained. Open, Share, Save, Rename and Delete are available
+for outputs. MediaStore exports use pending entries; image export offers original
+bytes, PNG, quality-100 JPEG and lossless WebP.
+
+Visuals use SDXL remotely, with prompt, negative prompt, supported resolution,
+seed, persistent history, full-screen swipe/pinch preview and independent outputs.
+SDXL's two 77-token encoder limits are enforced by the server without truncation.
+
+Video settings come from real backend capabilities. Wan has a live **X / 100
+words** counter; overlong prompts remain editable but cannot generate. LTX uses
+conditioned five-second segments for 15/30/45/60 seconds at 320x192. Live 15- and
+60-second outputs were verified; 30/45 use the same segment assembly. This is
+continuation, not native minute-long inference, and continuity is not guaranteed.
+The 60-second test needed explicit resumes after GPU allocation failures. Wan's
+one-second 256x256 path was tested live; other advertised Wan presets still need
+phone acceptance testing. MP4s download, validate and attach to the project for
+play/replay/save/share. Restore an output's prompt/settings to regenerate or edit
+a variation; generations remain separate outputs in the same project.
+
+## App source and remaining boundaries
+
+Coding models generate JSON source bundles which are validated into a project
+source tree. Files can be edited, versioned and exported as ZIP with assets.
+Malformed/truncated model output remains a text draft for inspection; it is never
+reported as a compiled app. No isolated Android build worker is connected, so
+in-app APK/AAB compilation is explicitly unavailable. Generated code is not run
+as arbitrary shell commands on the inference Space.
+
+The current Space uses ephemeral storage. Deployments can remove backend jobs
+and results; Android retains IDs and reports unknown/restarted jobs without
+regenerating. Download finished outputs before redeploying or attach durable
+storage. GPU quota, allocation time and model availability are external limits.
+Private end-user onboarding/gateway distribution, automated provider fallback,
+and a production isolated app-build service remain external integration work.
+Phone UI, background restrictions, microphone, local inference performance and
+media exports still require physical-device acceptance testing.
 
 ## Build and verification
 
-Java 17, Gradle 8.9, Android SDK 35, NDK 29.0.13113456 and CMake 3.31.6 are required. Initialize submodules recursively, then run `gradle :app:testDebugUnitTest assembleDebug bundleRelease --console=plain`. The APK targets ARM64 Android 13+.
+Use Java 17, Gradle 8.9, Android SDK 35, NDK 29.0.13113456 and CMake 3.31.6.
+Initialize submodules recursively, then run:
 
-GitHub Actions verifies the APK signature and ZIP alignment and publishes the APK with its SHA-256 and exact size. The download regression checks reject truncated files, corruption with unchanged file size, and partial files larger than the old 1 MB threshold. Building successfully does not establish device video performance.
+```text
+gradle :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:bundleRelease --console=plain
+```
 
-## Manual checks when a device is available
+Tests cover model corruption, prompt limits, routing, Office package structure,
+embedded assets, project migration, managed copy isolation, durable job identity
+and Local Only blocking. Android behavior tests use
+[Robolectric 4.14](https://robolectric.org/compatibility_table/), compatible with
+API 34/35 and this Java toolchain. DOCX/PPTX/XLSX packages were additionally opened
+by independent Python Office readers. Live GPU tests generated and downloaded
+an SDXL PNG and both Qwen text outputs; no sample output substitutes generation.
 
-- Start a large download and confirm it remains downloading after 1 MB. Pause Wi-Fi, resume, cancel and retry; restart the app mid-download. Confirm a file is usable only after verification.
-- Verify an old v0.4 file; confirm a partial/corrupt one fails and a complete valid one is retained.
-- Complete all three Wan files, disconnect the network, generate a local clip, preview it, then save to the gallery as MP4.
-- Cancel during loading/sampling and switch to a text workflow; verify cleanup before the next model starts.
-- Configure Video Backend, Test Connection, generate QUICK at 1 second / 256x256.
-- Navigate to Projects, switch Android apps, then restart Coder Abyss: confirm the same job ID remains.
-- Disconnect/reconnect internet and confirm no duplicate generation; retry a failed download only.
-- Paste 101 Wan words, confirm Generate disables, shorten to 100 and confirm it enables.
-- Enable Local Only: hosted calls stop while saved videos still play and export.
-- Preview, share, save and reopen the completed project. Then try LONG at 15 seconds.
-
-Backend CUDA, Wan and LTX tests ran against real ZeroGPU hardware. All eight Android unit tests, debug APK and release AAB builds passed. APK
-signature and 16KB ZIP/ELF alignment passed. Android phone
-navigation/process-death/network/preview checks require a connected device and
-are not claimed as completed by a desktop build.
-
-## Runtime and model sources
-
-The native video runtime is [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) (MIT), statically linked with a private GGML copy to avoid collisions with llama.cpp. Public Wan weights originate from [Wan2.1](https://github.com/Wan-Video/Wan2.1) (Apache-2.0); the manifest names the quantized/repackaged distribution sources. Bundled runtime license notices are in `app/src/main/assets/wan-runtime-licenses.txt`.
+GitHub Actions builds the APK/AAB and publishes exact APK bytes and SHA-256,
+checks APK signing and 16 KB ZIP alignment. Download the **Coder-Abyss-APK-v0.7**
+artifact, extract it, and install `app-debug.apk` (not the artifact ZIP or AAB).
+See `docs/v0.7-verification.md` for release-specific results and phone checks.

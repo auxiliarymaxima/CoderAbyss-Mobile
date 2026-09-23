@@ -11,3 +11,5 @@ captures/
 .cxx/
 
 build-error.txt
+
+.kotlin/

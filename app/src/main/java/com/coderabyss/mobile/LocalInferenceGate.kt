@@ -2,5 +2,5 @@ package com.coderabyss.mobile
 
 import kotlinx.coroutines.sync.Mutex
 
-/** One memory-heavy native inference operation at a time, including speech and video. */
+/** One local text LLM at a time. Speech owns a separate mutex. */
 object LocalInferenceGate { val mutex = Mutex() }

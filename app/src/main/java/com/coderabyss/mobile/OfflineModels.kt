@@ -40,7 +40,9 @@ object ModelCatalog {
 
 
     val models = listOf(
-        wan,
+        OfflineModel("lfm-2.5-1.2b-q4", "LFM2.5 Companion 1.2B", "LiquidAI", "AI Companion • Private • Offline", ModelKind.TEXT,
+            "Q4_K_M", "731 MB", "LFM2.5-1.2B-Instruct-Q4_K_M.gguf",
+            "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/resolve/main/LFM2.5-1.2B-Instruct-Q4_K_M.gguf?download=true"),
 
         OfflineModel(
             id = "qwen-coder-1.5b-q4",
@@ -272,43 +274,62 @@ class OfflineModelManager(context: Context) {
     private fun downloadId(model: OfflineModel, name: String): Long =
         prefs.getLong(key(name), if (name == model.fileName) prefs.getLong("download_${model.id}", -1L) else -1L)
 
+    /** New transfers use the shared task store and a resumable worker; old OS downloads remain readable. */
     @Synchronized
     fun startDownload(model: OfflineModel): Long {
+        require(model.kind == ModelKind.TEXT || model.kind == ModelKind.SPEECH) { "This model runs on Cloud GPU." }
+        VideoBackendSettings(appContext).requireRemoteAllowed()
         if (isInstalled(model)) return -1L
-        if (files(model).any { checking.contains(it) }) return -1L
-        var lastId = -1L
-        try {
-            for (name in files(model)) {
-                if (verified(name)) continue
-                val old = downloadId(model, name)
-                if (old > 0) downloadManager.remove(old)
-                File(modelDirectory, "$name.part").delete()
-                File(modelDirectory, name).delete()
-                prefs.edit().remove("error_$name").remove("verified_$name").apply()
-                val request = DownloadManager.Request(Uri.parse(spec(name).getString("url")))
-                    .setTitle("${model.name}: $name")
-                    .setDescription("Downloading model file; verification follows")
-                    .setAllowedOverRoaming(false)
-                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    .setDestinationInExternalFilesDir(appContext, null, "models/$name.part")
-                if (wifiOnly()) request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI).setAllowedOverMetered(false)
-                else request.setAllowedOverMetered(true)
-                lastId = downloadManager.enqueue(request)
-                prefs.edit().putLong(key(name), lastId).remove("download_${model.id}").apply()
-            }
-        } catch (e: Exception) {
-            prefs.edit().putString("error_${model.fileName}", e.message ?: "Could not start download").apply()
+        if(managedTask(model)?.optString("status") == "FAILED") File(modelDirectory, "${model.fileName}.resume.part").delete()
+        check(files(model).sumOf { size(it) } < storageRoot.usableSpace + files(model).sumOf { File(modelDirectory, "$it.resume.part").length() }) { "Not enough free storage for this model." }
+        for (name in files(model)) {
+            val old = downloadId(model, name)
+            if(old > 0) downloadManager.remove(old)
+            prefs.edit().remove(key(name)).remove("error_$name").apply()
         }
-        return lastId
+        val id = prefs.getString("task_${model.id}", null) ?: java.util.UUID.randomUUID().toString()
+        val store = com.coderabyss.mobile.tasks.PersistentTaskStore(appContext)
+        val task = runCatching { store.read(id) }.getOrElse { org.json.JSONObject().put("taskId", id).put("projectId", "").put("service", "MODEL").put("operation", "MODEL_DOWNLOAD").put("model", model.id).put("createdAt", System.currentTimeMillis()).put("remote", false).put("parameters", org.json.JSONObject()) }
+        task.put("status", "QUEUED").put("stage", "Waiting to download model").put("paused", false).put("cancelRequested", false)
+        store.write(task); prefs.edit().putString("task_${model.id}", id).apply()
+        enqueueDownload(model, id)
+        return -1L
+    }
+    fun enqueueDownload(model: OfflineModel, id: String) {
+        val request = androidx.work.OneTimeWorkRequestBuilder<com.coderabyss.mobile.models.ModelDownloadWorker>()
+            .setInputData(androidx.work.workDataOf("taskId" to id))
+            .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(if(wifiOnly()) androidx.work.NetworkType.UNMETERED else androidx.work.NetworkType.CONNECTED).build())
+            .setBackoffCriteria(androidx.work.BackoffPolicy.EXPONENTIAL, 30, java.util.concurrent.TimeUnit.SECONDS).build()
+        androidx.work.WorkManager.getInstance(appContext).enqueueUniqueWork("model-${model.id}", androidx.work.ExistingWorkPolicy.REPLACE, request)
+    }
+    fun managedTask(model: OfflineModel): org.json.JSONObject? = prefs.getString("task_${model.id}", null)?.let { runCatching { com.coderabyss.mobile.tasks.PersistentTaskStore(appContext).read(it) }.getOrNull() }
+    fun pauseDownload(model: OfflineModel) {
+        managedTask(model)?.let { task -> com.coderabyss.mobile.tasks.PersistentTaskStore(appContext).update(task.getString("taskId")) { it.put("paused", true).put("status", "PAUSED").put("stage", "Paused; downloaded bytes retained") } }
+        androidx.work.WorkManager.getInstance(appContext).cancelUniqueWork("model-${model.id}")
+    }
+    fun stopNetworkForLocalOnly() {
+        ModelCatalog.models.forEach { model ->
+            if(managedTask(model) != null) return@forEach
+            files(model).forEach { name -> val id = downloadId(model, name); if(id > 0) { downloadManager.remove(id); prefs.edit().remove(key(name)).putString("error_$name", "Legacy transfer stopped by Local Only. Download again when online access is enabled.").apply() } }
+        }
+    }
+    fun downloadSpec(model: OfflineModel) = org.json.JSONObject(spec(model.fileName).toString())
+    fun markVerified(model: OfflineModel) {
+        val final = modelFile(model)
+        prefs.edit().putString("verified_${model.fileName}", "${spec(model.fileName).getString("sha256")}:${final.lastModified()}").remove("error_${model.fileName}").commit()
     }
 
     @Synchronized
     fun cancelDownload(model: OfflineModel) {
+        managedTask(model)?.let { task -> com.coderabyss.mobile.tasks.PersistentTaskStore(appContext).update(task.getString("taskId")) { it.put("cancelRequested", true).put("status", "CANCELLED").put("stage", "Download cancelled") } }
+        androidx.work.WorkManager.getInstance(appContext).cancelUniqueWork("model-${model.id}")
+        prefs.edit().remove("task_${model.id}").apply()
         for (name in files(model)) {
             epochs[name] = (epochs[name] ?: 0) + 1
             val id = downloadId(model, name)
             if (id > 0) downloadManager.remove(id)
             File(modelDirectory, "$name.part").delete()
+            File(modelDirectory, "$name.resume.part").delete()
             prefs.edit().remove(key(name)).remove("error_$name").apply()
         }
         prefs.edit().remove("download_${model.id}").apply()
@@ -392,6 +413,15 @@ class OfflineModelManager(context: Context) {
     }
 
     fun state(model: OfflineModel): ModelTransferState {
+        managedTask(model)?.let { task ->
+            if(isInstalled(model)) return ModelTransferState(TransferStatus.INSTALLED, 100, size(model.fileName), size(model.fileName))
+            val bytes = File(modelDirectory, "${model.fileName}.resume.part").length(); val total = size(model.fileName)
+            return ModelTransferState(when(task.optString("status")) {
+                "DOWNLOADING" -> TransferStatus.DOWNLOADING; "VERIFYING" -> TransferStatus.VERIFYING
+                "PAUSED", "WAITING_FOR_CONNECTION" -> TransferStatus.PAUSED; "FAILED" -> TransferStatus.FAILED
+                "CANCELLED" -> TransferStatus.NOT_INSTALLED; else -> TransferStatus.QUEUED
+            }, (bytes * 100 / total).toInt().coerceIn(0, 99), bytes, total, message = task.optString("stage"))
+        }
         val parts = files(model).map { assetState(model, it) }
         val total = parts.sumOf { it.total }
         val downloaded = parts.sumOf { it.downloaded }

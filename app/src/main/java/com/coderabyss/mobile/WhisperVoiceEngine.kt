@@ -16,6 +16,7 @@ class WhisperVoiceEngine {
 
     companion object {
         const val SAMPLE_RATE = 16000
+        private val speechMutex = kotlinx.coroutines.sync.Mutex()
     }
 
     private var recorder: AudioRecord? =
@@ -198,7 +199,7 @@ class WhisperVoiceEngine {
             Dispatchers.IO
         ) {
 
-            LocalInferenceGate.mutex.withLock {
+            speechMutex.withLock {
             val whisper = WhisperContext.createContextFromFile(model.absolutePath)
             try {
                 whisper.transcribeData(audio, printTimestamp = false).trim()

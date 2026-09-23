@@ -18,6 +18,7 @@ class LocalLlmEngine(context: Context) {
     companion object {
         // Every workflow wraps the same native engine. Hold this through cleanup.
         private val mutex = LocalInferenceGate.mutex
+        val activeModelPath = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     }
 
     suspend fun generate(
@@ -37,10 +38,12 @@ class LocalLlmEngine(context: Context) {
                 withContext(Dispatchers.IO) { engine.cleanUp() }
             }
             try {
+                activeModelPath.value = modelPath
                 engine.loadModel(modelPath)
                 engine.setSystemPrompt(systemPrompt)
                 engine.sendUserPrompt(prompt, maxTokens).collect { onToken(it) }
             } finally {
+                activeModelPath.value = null
                 // Free native memory on success, failure, navigation and cancellation.
                 withContext(NonCancellable + Dispatchers.IO) {
                     if (engine.state.value.isModelLoaded || engine.state.value is InferenceEngine.State.Error) {

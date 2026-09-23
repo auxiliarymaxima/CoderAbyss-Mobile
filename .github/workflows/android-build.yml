@@ -62,7 +62,9 @@ jobs:
         run: |
           SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           APK=app/build/outputs/apk/debug/app-debug.apk
+          python3 scripts/verify-apk-native.py "$APK"
           "$SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          "$SDK_ROOT/build-tools/35.0.0/apksigner" verify --print-certs "$APK" > app/build/outputs/apk/debug/APK-SIGNER.txt
           "$SDK_ROOT/build-tools/35.0.0/zipalign" -c -P 16 4 "$APK"
           cd app/build/outputs/apk/debug
           sha256sum app-debug.apk > app-debug.apk.sha256
@@ -74,14 +76,15 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Coder-Abyss-APK-v0.6
+          name: Coder-Abyss-APK-v0.7
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/debug/app-debug.apk.sha256
             app/build/outputs/apk/debug/APK-SIZE.txt
+            app/build/outputs/apk/debug/APK-SIGNER.txt
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Coder-Abyss-AAB-v0.6
+          name: Coder-Abyss-AAB-v0.7
           path: app/build/outputs/bundle/release/app-release.aab

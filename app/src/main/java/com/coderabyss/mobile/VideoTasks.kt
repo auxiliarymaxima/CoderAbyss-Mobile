@@ -20,7 +20,7 @@ class VideoTasks(context: Context) {
     fun all(): List<JSONObject> = synchronized(lock) {
         root.listFiles()?.filter { it.isDirectory }?.mapNotNull {
             runCatching { read(it.name) }.getOrNull()
-        }?.sortedByDescending { it.optLong("createdAt") } ?: emptyList()
+        }?.filter { it.has("request") }?.sortedByDescending { it.optLong("createdAt") } ?: emptyList()
     }
 
     fun read(id: String): JSONObject = synchronized(lock) {
@@ -51,12 +51,14 @@ class VideoTasks(context: Context) {
     }
 
     fun create(prompt: String, duration: Int, resolution: String, engine: String = "wan", local: Boolean = false, parentProjectId: String? = null): String {
+        require(!local) { "Video generation is remote only." }
         if (engine == "wan") VideoPromptRules.validateWan(prompt)
         val id = UUID.randomUUID().toString()
         val ratio = when (resolution) { "256x256" -> "1:1"; "384x256" -> "3:2"; "512x288" -> "16:9"; "480x272" -> "30:17"; "320x192" -> "5:3"; "192x320" -> "3:5"; else -> "17:30" }
         val request = JSONObject().put("clientRequestId", id).put("engine", engine).put("prompt", prompt)
             .put("duration", duration).put("resolution", resolution).put("aspectRatio", ratio)
         val value = JSONObject().put("projectId", id).put("title", "Video ${all().size + 1}")
+            .put("type", "VIDEO").put("schemaVersion", 2).put("preferredModel", engine)
             .put("backend", if (local) "local-wan" else VideoBackendSettings.SPACE).put("request", request)
             .put("createdAt", System.currentTimeMillis()).put("updatedAt", System.currentTimeMillis())
             .put("status", "READY_TO_SUBMIT").put("stage", "Prompt saved").put("jobId", "")
@@ -79,7 +81,7 @@ class VideoTasks(context: Context) {
     }
 
     companion object {
-        private val lock = Any()
+        private val lock = com.coderabyss.mobile.projects.ProjectLocks.lock
         val finished = setOf("COMPLETED", "FAILED", "CANCELLED", "UNKNOWN", "DOWNLOAD_FAILED", "SUBMISSION_UNCERTAIN")
     }
 }
@@ -89,14 +91,17 @@ class VideoTaskWorker(context: Context, parameters: WorkerParameters) : Coroutin
         val id = inputData.getString("projectId") ?: return Result.failure()
         val tasks = VideoTasks(applicationContext)
         val settings = VideoBackendSettings(applicationContext)
-        val client = HuggingFaceVideoClient(applicationContext)
         var task = tasks.read(id)
+        val client = HuggingFaceVideoClient(applicationContext, task.optString("backend").takeIf { it.contains("/") } ?: VideoBackendSettings.SPACE)
         if (task.optString("status") in setOf("COMPLETED", "CANCELLED", "FAILED", "UNKNOWN")) return Result.success()
         if (task.optBoolean("cancelRequested") && !task.optBoolean("submissionAttempted") && task.optString("jobId").isBlank()) {
             tasks.update(id) { it.put("status", "CANCELLED").put("stage", "Cancelled before submission") }
             return Result.success()
         }
-        if (task.optString("backend") == "local-wan") return runLocal(id, tasks, task)
+        if (task.optString("backend") == "local-wan") {
+            tasks.update(id) { it.put("status", "FAILED").put("stage", "Local video generation is no longer supported. Prompt and existing files were preserved; choose Cloud GPU.") }
+            return Result.success()
+        }
         if (settings.localOnly) {
             tasks.update(id) { it.put("status", "LOCAL_ONLY").put("stage", "Unavailable while Local Only is enabled.") }
             return Result.retry()
@@ -155,6 +160,7 @@ class VideoTaskWorker(context: Context, parameters: WorkerParameters) : Coroutin
                             tasks.update(id) { it.put("downloadedBytes", bytes).put("totalBytes", total) }
                         }
                         tasks.update(id) { it.put("status", "COMPLETED").put("stage", "Complete").put("output", metadata).put("completedAt", System.currentTimeMillis()) }
+                        com.coderabyss.mobile.projects.ProjectRepository(applicationContext).attach(id, "generations/$id.mp4", "video/mp4", metadata)
                     } catch (error: Exception) {
                         if (settings.localOnly) {
                             tasks.update(id) { it.put("status", "LOCAL_ONLY").put("stage", "Unavailable while Local Only is enabled.") }

@@ -8,14 +8,20 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
-    <application
+    <application android:name=".CoderAbyssApplication"
         android:allowBackup="true"
-        android:label="Coder Abyss"
+        android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.CoderAbyss">
         <service android:name="androidx.work.impl.foreground.SystemForegroundService"
-            android:foregroundServiceType="dataSync|mediaProcessing" tools:node="merge" />
+            android:foregroundServiceType="dataSync|mediaProcessing|specialUse" tools:node="merge">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-initiated local AI inference and document processing" />
+        </service>
+        <service android:name=".voice.VoiceCaptureService" android:exported="false" android:foregroundServiceType="microphone" />
+        <receiver android:name=".tasks.TaskCancelReceiver" android:exported="false" />
         <provider android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"
             android:exported="false" android:grantUriPermissions="true">

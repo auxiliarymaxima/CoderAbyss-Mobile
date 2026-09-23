@@ -18,7 +18,7 @@ class VideoBackendSettings(context: Context) {
     private val credential = File(app.noBackupFilesDir, "video-backend-credential")
     var localOnly: Boolean
         get() = prefs.getBoolean("local_only", false)
-        set(value) { prefs.edit().putBoolean("local_only", value).commit() }
+        set(value) { prefs.edit().putBoolean("local_only", value).commit(); if(value) OfflineModelManager(app).stopNetworkForLocalOnly() }
 
     fun requireRemoteAllowed() {
         check(!localOnly) { "Unavailable while Local Only is enabled." }
