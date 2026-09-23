@@ -64,6 +64,7 @@ class TaskManager(context: Context) {
                 false
             } else {
                 check(!settings.localOnly) { "Unavailable in Local Only mode." }
+                com.coderabyss.mobile.account.AuthorizationRepository.requireCloud(app)
                 check(SpaceRegistry.capability(app, model)?.optBoolean("available") == true) { "Configure and test the Cloud GPU provider first" }
                 true
             }
@@ -85,7 +86,7 @@ class TaskManager(context: Context) {
         }
         val task = JSONObject().put("taskId", id).put("projectId", projectId).put("service", type.name)
             .put("operation", operation.name).put("model", model).put("remote", remote)
-            .put("space", SpaceRegistry.configured(app)).put("parameters", input).put("clientRequestId", id)
+            .put("provider", if(remote) "gateway" else "local").put("accountUid", if(remote) com.coderabyss.mobile.account.AuthRepository.get(app).uid.value else "").put("space", "gateway").put("parameters", input).put("clientRequestId", id)
             .put("createdAt", now).put("updatedAt", now).put("status", "PENDING").put("stage", "Input saved")
             .put("jobId", "").put("cancelRequested", false).put("log", JSONArray())
         projects.update(projectId) { if (operation in setOf(Operation.TEXT, Operation.IMAGE, Operation.VIDEO)) it.put("preferredModel", model)

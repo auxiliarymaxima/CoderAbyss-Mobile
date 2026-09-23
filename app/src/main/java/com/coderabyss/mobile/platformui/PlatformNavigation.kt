@@ -76,7 +76,7 @@ fun ProjectsScreen(vm: WorkspaceViewModel, onOpen: (String) -> Unit) {
         Text("Projects", style = MaterialTheme.typography.headlineMedium)
         Button(onClick = { newProject = true }) { Text("New Project") }; Text(message)
         projects.forEach { project -> val id = project.getString("projectId")
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) {
+            Card(Modifier.fillMaxWidth(), border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color(0xFF0A587A))) { Column(Modifier.padding(12.dp)) {
                 TextButton(onClick = { onOpen(id) }) { Text(project.optString("title")) }
                 Text(project.optString("type")); Row {
                     TextButton(onClick = { rename = project; name = project.optString("title") }) { Text("Rename") }

@@ -25,7 +25,7 @@ fun ModelPicker(service: Service, selected: String, onSelect: (String) -> Unit, 
                 ModelRegistry.forService(service).filter { it.executionType == execution }.forEach { model ->
                     TextButton(onClick = { onSelect(model.id); open = false }) { Text("${if (model.id == selected) "✓ " else ""}${model.name} ${model.version}") }
                     Text(if (execution == ExecutionType.LOCAL) DeviceCompatibility.evaluate(model, DeviceCompatibility.snapshot(context)).reason
-                        else if (VideoBackendSettings(context).localOnly) "Unavailable in Local Only mode." else if (SpaceRegistry.capability(context, model.id)?.optBoolean("available") == true) "Available on Cloud GPU" else "Configure / Test provider", style = MaterialTheme.typography.bodySmall)
+                        else if (VideoBackendSettings(context).localOnly) "Unavailable in Local Only mode." else if (SpaceRegistry.capability(context, model.id)?.optBoolean("available") == true) "Available on Cloud GPU" else "Sign in / Test AI Services", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -40,14 +40,14 @@ fun PlatformModelsScreen(onBack: () -> Unit, onSettings: () -> Unit) {
     var filter by remember { mutableStateOf("ON DEVICE") }; var requirements by remember { mutableStateOf<ModelDescriptor?>(null) }
     LaunchedEffect(Unit) { while (true) { tick++; delay(1000) } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        TextButton(onClick = onBack) { Text("Back") }; Text("AI Models", style = MaterialTheme.typography.headlineMedium)
+        com.coderabyss.mobile.presentation.ScreenHeader("AI Models", "On-device models and authorized cloud services", onBack)
         Column { listOf("ON DEVICE", "CLOUD GPU", "INSTALLED", "AVAILABLE").chunked(2).forEach { choices -> Row { choices.forEach { choice -> FilterChip(filter == choice, { filter = choice }, label = { Text(choice) }) } } } }
         var wifiOnly by remember { mutableStateOf(manager.wifiOnly()) }
         Row { Text("Download on Wi-Fi only", Modifier.weight(1f)); Switch(wifiOnly, { wifiOnly = it; manager.setWifiOnly(it) }) }
         Text("Downloads install automatically only after full size and SHA-256 verification.")
         Text(error, color = MaterialTheme.colorScheme.error)
         ModelRegistry.all().filter { when(filter) { "CLOUD GPU" -> it.executionType == ExecutionType.HUGGING_FACE_SPACE; "INSTALLED" -> it.local?.let(manager::isInstalled) == true; "AVAILABLE" -> it.local?.let(manager::isInstalled) != true; else -> it.executionType == ExecutionType.LOCAL } }.forEach { model ->
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp)) {
+            Card(Modifier.fillMaxWidth(), border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color(0xFF0A587A))) { Column(Modifier.padding(14.dp)) {
                 Text(model.name, style = MaterialTheme.typography.titleMedium); Text(model.version)
                 if (model.local != null) {
                     val state = remember(model.id, tick) { manager.state(model.local) }
@@ -69,7 +69,7 @@ fun PlatformModelsScreen(onBack: () -> Unit, onSettings: () -> Unit) {
                 } else {
                     Text("Cloud GPU · ${model.supportedServices.joinToString { it.name.lowercase() }}")
                     val capability = SpaceRegistry.capability(context, model.id)
-                    Text(if (VideoBackendSettings(context).localOnly) "Unavailable in Local Only mode." else if (capability?.optBoolean("available") == true) "Available" else "Configure provider")
+                    Text(if (VideoBackendSettings(context).localOnly) "Unavailable in Local Only mode." else if (capability?.optBoolean("available") == true) "Available" else "Check AI Services")
                     TextButton(onClick = onSettings) { Text("Configure / Test Connection") }
                 }
                 TextButton(onClick = { requirements = model }) { Text("Requirements / Source") }

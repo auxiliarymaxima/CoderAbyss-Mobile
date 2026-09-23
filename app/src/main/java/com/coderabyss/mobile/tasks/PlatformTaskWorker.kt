@@ -11,7 +11,7 @@ import com.coderabyss.mobile.*
 import com.coderabyss.mobile.exports.DocumentExporter
 import com.coderabyss.mobile.models.*
 import com.coderabyss.mobile.projects.ProjectRepository
-import com.coderabyss.mobile.remote.HuggingFaceProvider
+import com.coderabyss.mobile.remote.GatewayProvider
 import com.coderabyss.mobile.remote.SpaceRegistry
 import com.coderabyss.mobile.research.ResearchSources
 import kotlinx.coroutines.CancellationException
@@ -205,7 +205,11 @@ class PlatformTaskWorker(context: Context, parameters: WorkerParameters) : Corou
     private suspend fun remote(task: JSONObject): Result {
         if (settings.localOnly) { stage("PAUSED", "Unavailable in Local Only mode."); return Result.retry() }
         if (!SpaceRegistry.online(applicationContext)) { stage("WAITING_FOR_CONNECTION", "Waiting for connection"); return Result.retry() }
-        val provider = HuggingFaceProvider(applicationContext, task.getString("space")); val input = task.getJSONObject("parameters")
+        if (task.optString("provider") != "gateway" || task.optString("accountUid").isBlank()) {
+            stage("UNKNOWN", "Legacy provider job preserved. Secure server-side ownership migration is required; no new job was submitted.")
+            return Result.success()
+        }
+        val provider = GatewayProvider(applicationContext, task.getString("accountUid")); val input = task.getJSONObject("parameters")
         var jobId = task.optString("jobId")
         try {
             if (jobId.isBlank()) {

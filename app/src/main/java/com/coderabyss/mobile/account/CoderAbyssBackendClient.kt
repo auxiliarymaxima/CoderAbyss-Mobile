@@ -1,4 +1,6 @@
-package com.coderabyss.mobile
+package com.coderabyss.mobile.account
+
+import com.coderabyss.mobile.*
 
 import com.coderabyss.mobile.remote.*
 import android.content.Context
@@ -19,56 +21,61 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /** Gradio's short call/event exchange is encapsulated here, never in Compose. */
-class HuggingFaceSpaceClient(private val context: Context, private val space: String = com.coderabyss.mobile.remote.SpaceRegistry.configured(context)) {
-    private val endpoint = com.coderabyss.mobile.remote.SpaceRegistry.endpoint(space)
+class CoderAbyssBackendClient(private val context: Context, private val expectedUid: String? = null) {
+    private val space = "gateway"
+    private val endpoint = context.getString(R.string.gateway_url).trimEnd('/')
     private val settings = VideoBackendSettings(context)
     private val http = NetworkPolicy.client(context).connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS).callTimeout(60, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).build()
 
-    private fun request(url: String): Request.Builder {
+    private suspend fun request(url: String): Request.Builder {
         settings.requireRemoteAllowed()
-        check(false) { "Direct provider access is retired. Use the authenticated Coder Abyss gateway; legacy job IDs remain preserved." }
+        check(endpoint.isNotBlank()) { "Cloud AI is not configured for this build." }
         val parsed = url.toHttpUrl()
-        check(parsed.scheme == "https" && parsed.port == 443 && parsed.host == endpoint.toHttpUrl().host) {
-            "Backend returned an untrusted result address."
+        val origin = endpoint.toHttpUrl()
+        check(origin.scheme == "https" && origin.port == 443 && origin.encodedPath == "/" && origin.username.isEmpty() && origin.password.isEmpty()) { "Invalid Cloud AI configuration" }
+        check(parsed.scheme == "https" && parsed.port == 443 && parsed.host == origin.host) { "Untrusted result address" }
+        val auth = AuthRepository.get(context)
+        if (expectedUid != null) check(expectedUid.isNotBlank() && auth.uid.value == expectedUid) { "Sign in with the account that started this task." }
+        return Request.Builder().url(parsed).header("Authorization", "Bearer ${auth.token(expectedUid)}")
+    }
+
+    suspend fun api(path: String, body: JSONObject? = null): JSONObject = withContext(Dispatchers.IO) {
+        require(!path.contains("..") && !path.startsWith("/") && !path.contains("://"))
+        val builder = request("$endpoint/$path")
+        if(body != null) builder.post(body.toString().toRequestBody("application/json".toMediaType()))
+        http.newCall(builder.build()).execute().use { response ->
+            checkResponse(response.code)
+            JSONObject(response.body?.string() ?: throw IOException("Empty backend response"))
         }
-        if(!settings.configured()) { SpaceRegistry.health(context, space, ProviderHealth.AUTHENTICATION_REQUIRED); throw BackendUnavailable(ProviderHealth.AUTHENTICATION_REQUIRED, "Authentication required. Configure the provider in Settings.") }
-        return Request.Builder().url(parsed).header("Authorization", "Bearer ${settings.token()}")
     }
 
     private fun checkResponse(code: Int) {
         val health = when(code) { 401,403 -> ProviderHealth.AUTHENTICATION_REQUIRED; 429 -> ProviderHealth.RATE_LIMITED; 502,503,504 -> ProviderHealth.STARTING; in 200..299 -> ProviderHealth.READY; else -> ProviderHealth.OFFLINE }
         SpaceRegistry.health(context, space, health)
         if(code !in 200..299) throw BackendUnavailable(health, when(health) {
-            ProviderHealth.AUTHENTICATION_REQUIRED -> "Authentication failed. Check provider settings."
+            ProviderHealth.AUTHENTICATION_REQUIRED -> "Sign in and check your Cloud AI plan in Settings."
             ProviderHealth.RATE_LIMITED -> "Provider rate limit reached. The same request will be checked later."
             ProviderHealth.STARTING -> "Starting AI server..."
             else -> "Backend unavailable (HTTP $code)."
         })
     }
 
-    suspend fun call(name: String, data: JSONArray): JSONArray = withContext(Dispatchers.IO) {
-        val base = "${endpoint}/gradio_api/call/$name"
-        val body = JSONObject().put("data", data).toString().toRequestBody("application/json".toMediaType())
-        val eventId = http.newCall(request(base).post(body).build()).execute().use { response ->
-            checkResponse(response.code)
-            JSONObject(response.body?.string() ?: throw IOException("Empty backend response")).getString("event_id")
+    suspend fun call(name: String, data: JSONArray): JSONArray {
+        val response = when(name) {
+            "capabilities" -> api("ai/capabilities")
+            "submit_job" -> api("tasks", data.getJSONObject(0))
+            "find_job" -> api("tasks/find/${safeId(data.getString(0))}")
+            "get_job_status" -> api("tasks/${safeId(data.getString(0))}")
+            "cancel_job" -> api("tasks/${safeId(data.getString(0))}/cancel", JSONObject())
+            "retry_job" -> api("tasks/${safeId(data.getString(0))}/retry", JSONObject())
+            "get_result" -> api("tasks/${safeId(data.getString(0))}/result")
+            else -> error("Unsupported gateway operation")
         }
-        check(eventId.matches(Regex("[a-zA-Z0-9-]{1,128}"))) { "Invalid backend event ID." }
-        http.newCall(request("$base/$eventId").build()).execute().use { response ->
-            checkResponse(response.code)
-            val reader = response.body?.charStream()?.buffered() ?: throw IOException("Empty backend response")
-            var event = ""
-            while (true) {
-                val line = reader.readLine() ?: break
-                if (line.startsWith("event: ")) event = line.removePrefix("event: ").trim()
-                if (line.startsWith("data: ") && event == "complete") return@withContext JSONArray(line.removePrefix("data: "))
-                if (event == "error") throw IOException("Backend rejected the request. Check supported parameters and authentication.")
-            }
-            throw IOException("Backend response interrupted. Check the same job; do not regenerate.")
-        }
+        return if(name == "get_result") JSONArray().put(response.getJSONObject("metadata")).put(JSONObject().put("url", "$endpoint/tasks/${safeId(data.getString(0))}/content")) else JSONArray().put(response)
     }
+    private fun safeId(id: String): String { require(id.matches(Regex("[A-Za-z0-9-]{1,128}"))); return id }
 
     suspend fun capabilities(): JSONObject = call("capabilities", JSONArray()).getJSONObject(0).also { VideoModelCatalog.save(context, it) }
     suspend fun submitVideoJob(parameters: JSONObject): JSONObject {
@@ -103,6 +110,7 @@ class HuggingFaceSpaceClient(private val context: Context, private val space: St
                         while (true) {
                             kotlinx.coroutines.currentCoroutineContext().ensureActive()
                             settings.requireRemoteAllowed()
+                            if(expectedUid != null) check(AuthRepository.get(context).uid.value == expectedUid) { "Account changed" }
                             val count = input.read(bytes)
                             if (count < 0) break
                             output.write(bytes, 0, count)

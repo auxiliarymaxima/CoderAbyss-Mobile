@@ -12,7 +12,7 @@ class BackendUnavailable(val health: ProviderHealth, message: String) : java.io.
 object SpaceRegistry {
     fun health(context: Context) = runCatching { ProviderHealth.valueOf(context.getSharedPreferences("video_backend", 0).getString("health", "UNTESTED")!!) }.getOrDefault(ProviderHealth.UNTESTED)
     fun health(context: Context, space: String, value: ProviderHealth) {
-        if(space == configured(context)) context.getSharedPreferences("video_backend", 0).edit().putString("health", value.name).apply()
+        if(space == "gateway" || space == configured(context)) context.getSharedPreferences("video_backend", 0).edit().putString("health", value.name).apply()
     }
     fun configured(context: Context): String = context.getSharedPreferences("video_backend", Context.MODE_PRIVATE)
         .getString("space_id", VideoBackendSettings.SPACE) ?: VideoBackendSettings.SPACE
@@ -44,6 +44,13 @@ interface RemoteInferenceProvider {
 class HuggingFaceProvider(context: Context, space: String) : RemoteInferenceProvider {
     val client = com.coderabyss.mobile.HuggingFaceSpaceClient(context, space)
     override suspend fun submit(parameters: JSONObject) = client.call("submit_job", org.json.JSONArray().put(parameters)).getJSONObject(0)
+    override suspend fun status(jobId: String) = client.getVideoJobStatus(jobId)
+    override suspend fun cancel(jobId: String) = client.cancelVideoJob(jobId)
+}
+
+class GatewayProvider(context: Context, uid: String) : RemoteInferenceProvider {
+    val client = com.coderabyss.mobile.account.CoderAbyssBackendClient(context, uid)
+    override suspend fun submit(parameters: JSONObject) = client.submitVideoJob(parameters)
     override suspend fun status(jobId: String) = client.getVideoJobStatus(jobId)
     override suspend fun cancel(jobId: String) = client.cancelVideoJob(jobId)
 }

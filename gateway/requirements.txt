@@ -1,0 +1,7 @@
+fastapi==0.141.1
+uvicorn==0.53.0
+firebase-admin==7.6.0
+google-cloud-firestore==2.31.0
+google-cloud-secret-manager==2.30.0
+google-api-python-client==2.200.0
+requests==2.34.2

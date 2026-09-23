@@ -56,12 +56,12 @@ fun WorkspaceScreen(id: String, vm: WorkspaceViewModel, onBack: () -> Unit, onMo
         Row { TextButton(onClick = onBack) { Text("Projects") }; Spacer(Modifier.weight(1f)); ModelPicker(service, selected, {
             vm.projects.update(id) { project -> project.put("preferredModel", it) }; prefs.edit().putString(service.name, it).apply()
         }, onModels) }
-        Text(serviceTitle(service), style = MaterialTheme.typography.headlineMedium)
+        com.coderabyss.mobile.presentation.ScreenHeader(serviceTitle(service), "Create, edit and save in your project", onBack)
         SavedTextField(project.optString("title"), "Project name", { vm.projects.update(id) { project -> project.put("title", it) } })
         Text(descriptor?.name ?: "Select a model")
         if (descriptor?.executionType == ExecutionType.HUGGING_FACE_SPACE) {
             Text(if (VideoBackendSettings(context).localOnly) "Unavailable in Local Only mode." else if (SpaceRegistry.capability(context, selected)?.optBoolean("available") == true) "Cloud GPU · ${SpaceRegistry.health(context).name.replace('_', ' ')}" else "Cloud GPU · Configure / test connection")
-            TextButton(onClick = onSettings) { Text("Provider settings") }
+            TextButton(onClick = onSettings) { Text("AI Services") }
         }
         SavedTextField(project.optString("prompt"), if (service == Service.RESEARCH) "Topic and instructions" else "Prompt", { vm.projects.update(id) { project -> project.put("prompt", it) } }, 4)
         PersistentVoiceControl(id, vm, tasks, onModels)
@@ -133,7 +133,7 @@ fun ChoiceMenu(label: String, selected: String, options: List<String>, onSelect:
 }
 
 @Composable
-fun PersistentVoiceControl(projectId: String, vm: WorkspaceViewModel, tasks: List<JSONObject>, onModels: () -> Unit) {
+fun PersistentVoiceControl(projectId: String, vm: WorkspaceViewModel, tasks: List<JSONObject>, onModels: () -> Unit, prominent: Boolean = false) {
     val context = LocalContext.current; var error by remember { mutableStateOf("") }
     val voiceTasks = tasks.filter { it.optString("operation") == "TRANSCRIBE" && it.optString("status") !in PersistentTaskStore.terminal }
     val recording = voiceTasks.firstOrNull { it.optString("status") == "RECORDING" }
@@ -151,14 +151,19 @@ fun PersistentVoiceControl(projectId: String, vm: WorkspaceViewModel, tasks: Lis
         }.onFailure { error = it.message ?: "Could not start speech capture" }
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if(granted) start() else error = "Microphone permission is required for dictation" }
-    Row {
-        OutlinedButton(enabled = recording != null || voiceTasks.isEmpty(), onClick = {
-            if(recording != null) context.startService(Intent(context, VoiceCaptureService::class.java).setAction("STOP"))
-            else if(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) start()
+    val toggle: () -> Unit = {
+        if(recording != null) context.startService(Intent(context, VoiceCaptureService::class.java).setAction("STOP"))
+        else if(voiceTasks.isEmpty()) {
+            if(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) start()
             else permission.launch(Manifest.permission.RECORD_AUDIO)
-        }) { Text(if (recording != null) "Stop and transcribe" else if(voiceTasks.isNotEmpty()) "Transcribing…" else "Tap to Speak") }
-        if (error.isNotBlank()) TextButton(onClick = onModels) { Text("AI Models") }
+        }
     }
+    val label = if(recording != null) "Stop and transcribe" else if(voiceTasks.isNotEmpty()) "Transcribing…" else "Tap to Speak"
+    if(prominent) {
+        com.coderabyss.mobile.presentation.MicrophoneButton(voiceTasks.isEmpty() || recording != null, toggle)
+        Text(label)
+    } else OutlinedButton(enabled = recording != null || voiceTasks.isEmpty(), onClick = toggle) { Text(label) }
+    if(error.isNotBlank()) TextButton(onClick = onModels) { Text("AI Models") }
     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
 }
 

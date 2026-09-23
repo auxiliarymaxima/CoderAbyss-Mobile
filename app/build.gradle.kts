@@ -13,8 +13,12 @@ android {
         applicationId = "com.coderabyss.mobile"
         minSdk = 33
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.7"
+        versionCode = 8
+        versionName = "0.7.1"
+        // Public application identifiers only. No service credentials belong here.
+        listOf("gateway_url", "google_web_client_id", "firebase_app_id", "firebase_project_id", "firebase_api_key").forEach { name ->
+            resValue("string", name, providers.gradleProperty("coderAbyss.$name").orElse("").get())
+        }
     }
 
     defaultConfig { ndk { abiFilters += "arm64-v8a" } }
@@ -43,6 +47,12 @@ android {
 }
 
 dependencies {
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    implementation("com.google.firebase:firebase-auth:23.2.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+    implementation("com.android.billingclient:billing-ktx:8.0.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.work:work-runtime-ktx:2.10.1")

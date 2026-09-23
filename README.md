@@ -1,7 +1,7 @@
-# Coder Abyss v0.7
+# Coder Abyss v0.7.1 — corrective integration
 
 Android creation workspaces with small local AI models and a private Hugging Face
-GPU backend. The APK targets ARM64 Android 13+ (versionCode 7).
+GPU backend. The APK targets ARM64 Android 13+ (versionCode 8).
 
 ## What runs where
 
@@ -28,24 +28,44 @@ Legacy local-Wan weights remain removable and existing videos remain usable.
 Native module revisions are preserved for build compatibility; the phone-local
 video execution path is disabled.
 
-## One provider configuration
+## Restored presentation and production account boundary
 
-Open **Settings → AI Provider / Video Backend**. Default Space:
-`andrewmonize/Coder-Abyss-Space`. Save a credential authorized to access that
-private Space once, then **Test Backend**. It is reused across all hosted
-services. Android Keystore AES-GCM protects it in the no-backup directory. Tokens
-never enter project metadata, source, BuildConfig, logs or APK resources.
+The v0.6 header, assistant face, cyan/dark panels, Quick Actions, microphone and
+bottom navigation are restored in `presentation/`. MainActivity opens
+`CoderAbyssShell`, not `PlatformApp`. v0.7 repositories, workers, exports, research,
+model registry and independent Whisper/text execution remain underneath.
 
-Direct private-Space access is a development/user-owned-provider configuration.
-A distributed product needs user-specific authorization or an authenticated
-gateway; an owner's personal token must never be bundled. No new Space Secret
-is required for the currently public model weights. Optional persistent backend
-storage uses the variable `CODER_ABYSS_DATA_DIR` pointing to an attached volume.
+**Deployment status:** Google/Firebase/Play/Cloud Run configuration is not supplied.
+The integration code builds, but live account/billing/gateway acceptance is not
+complete. Cloud generation fails closed until configured. Local features remain
+accessible through “Continue with local projects.” Do not treat this as an already
+launched subscription product.
 
-The Space selector permits another compatible primary/user-owned Space. Each
-submitted task pins its original Space; changing settings never migrates a
-running job. Provider state distinguishes ready, starting, rate-limited,
-authentication-required and offline responses. There is no silent fallback.
+Normal users sign in with Google through Credential Manager and Firebase Auth.
+The server validates signed, non-revoked identity tokens and returns role/plan
+state. Play supplies product prices; purchases/restore send tokens for server-side
+Developer API verification and acknowledgement. A client purchase callback never
+grants PRO. OWNER is pinned to a verified UID; OWNER can grant/revoke ADMIN, while
+ADMIN cannot rotate credentials or create owners. FREE retains local features;
+SUBSCRIBER receives verified paid cloud access. OWNER/authorized ADMIN bypass paid
+subscription, not configured resource limits.
+
+Android calls the Coder Abyss gateway. The HF credential lives exclusively in
+server Secret Manager; no normal-user token entry remains. Old development tokens
+are removed from device storage at upgrade and direct HF calls are disabled.
+Owner-only administration provides write-only rotation, emergency replacement,
+time-limited rollback, provider changes and audit metadata, with recent sign-in
+required. The server enforces all permissions independently of visible buttons.
+Changing the Space/credential does not require a new APK.
+
+See [gateway setup/security](gateway/README.md), [API contract](gateway/API.md), and
+[corrective verification report](docs/corrective-merge.md). No actual secret values
+are documented or bundled. Public Firebase app identifiers are build configuration,
+not the server credential. Projects remain device-local, accessible across sign-out;
+cloud sync is not implemented. New tasks are bound to the authenticated account.
+Pre-authentication remote jobs retain their IDs/files but require owner-reviewed
+server ownership migration. They are never assigned to the first login or silently
+resubmitted. Already downloaded videos/images remain usable.
 
 Hosted prompts/results are processed remotely. **Local Only** blocks hosted
 submission, polling, result downloads, provider tests, web source lookup and new
@@ -58,7 +78,7 @@ network request; tracking resumes after it is disabled.
 Projects live in app-private `Projects/{Apps,Videos,Research,Visuals,Companion}/UUID`.
 They contain metadata, prompts, sections/sources, outputs, assets, exports,
 source files and saved versions. Legacy video projects migrate in place without
-changing backend job IDs. Rename, duplicate, deletion and draft restoration are
+changing backend job IDs; remote legacy ownership reconciliation is explicit. Rename, duplicate, deletion and draft restoration are
 available. Restoring a draft does not resubmit generation or remove outputs.
 Managed cross-project assets are copies; deleting an original cannot break them.
 Source ZIP exports include managed non-audio assets.
@@ -134,7 +154,7 @@ The current Space uses ephemeral storage. Deployments can remove backend jobs
 and results; Android retains IDs and reports unknown/restarted jobs without
 regenerating. Download finished outputs before redeploying or attach durable
 storage. GPU quota, allocation time and model availability are external limits.
-Private end-user onboarding/gateway distribution, automated provider fallback,
+Gateway deployment/live account onboarding, automated provider fallback,
 and a production isolated app-build service remain external integration work.
 Phone UI, background restrictions, microphone, local inference performance and
 media exports still require physical-device acceptance testing.
@@ -153,10 +173,36 @@ embedded assets, project migration, managed copy isolation, durable job identity
 and Local Only blocking. Android behavior tests use
 [Robolectric 4.14](https://robolectric.org/compatibility_table/), compatible with
 API 34/35 and this Java toolchain. DOCX/PPTX/XLSX packages were additionally opened
-by independent Python Office readers. Live GPU tests generated and downloaded
+by independent Python Office readers. Historical v0.7 direct-Space GPU tests generated and downloaded
 an SDXL PNG and both Qwen text outputs; no sample output substitutes generation.
 
 GitHub Actions builds the APK/AAB and publishes exact APK bytes and SHA-256,
-checks APK signing and 16 KB ZIP alignment. Download the **Coder-Abyss-APK-v0.7**
+checks APK signing and 16 KB ZIP alignment. Download the **Coder-Abyss-APK-v0.7.1**
 artifact, extract it, and install `app-debug.apk` (not the artifact ZIP or AAB).
-See `docs/v0.7-verification.md` for release-specific results and phone checks.
+See `docs/corrective-merge.md` for current results and required phone checks;
+`docs/v0.7-verification.md` is historical.
+
+## Launcher branding
+
+An original cyan aperture/diamond mark uses scalable Android VectorDrawable layers,
+with a near-black adaptive background, round icon resource, Android 13 monochrome
+layer and matching native splash screen. The symbol stays within the adaptive
+safe area; there is no default Android icon or added splash delay. Physical launcher,
+themed-icon and Recent Apps checks remain on the device checklist.
+
+## Public Android deployment configuration
+
+Set these **public** values using Gradle properties (local user Gradle properties
+or protected CI configuration). Do not put private service credentials in them:
+
+- `coderAbyss.gateway_url` — trusted HTTPS gateway origin, no path.
+- `coderAbyss.google_web_client_id` — Web OAuth client ID.
+- `coderAbyss.firebase_app_id` — registered Firebase Android app ID.
+- `coderAbyss.firebase_project_id` — Firebase project ID.
+- `coderAbyss.firebase_api_key` — public Firebase API identifier, restricted to the
+  appropriate app/APIs in Google Cloud. It is not an authentication bypass.
+
+Empty defaults intentionally disable account/cloud access. Register each signing
+certificate correctly. Fresh CI debug keystores may differ; production upgrades
+need a stable protected signing key/Play App Signing. Do not uninstall an existing
+app containing needed projects just to work around a signing mismatch.

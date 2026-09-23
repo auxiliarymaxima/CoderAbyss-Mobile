@@ -13,3 +13,8 @@ captures/
 build-error.txt
 
 .kotlin/
+__pycache__/
+*.pyc
+.venv/
+.env
+service-account*.json

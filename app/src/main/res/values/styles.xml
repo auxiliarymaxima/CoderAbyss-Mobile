@@ -10,6 +10,8 @@
         <item name="android:statusBarColor">#020810</item>
         <item name="android:navigationBarColor">#020810</item>
         <item name="android:windowBackground">#020810</item>
+        <item name="android:windowSplashScreenBackground">#020810</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_abyss_foreground</item>
 
     </style>
 

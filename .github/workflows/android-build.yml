@@ -4,10 +4,23 @@ on:
   push:
     branches:
       - main
+      - fix/v07-v06-ui-auth-subscriptions-branding
 
   workflow_dispatch:
 
 jobs:
+
+  gateway-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r gateway/requirements-test.txt
+      - run: python -m unittest discover -s gateway/tests -v
+        env:
+          PYTHONPATH: gateway
 
   build:
 
@@ -63,6 +76,7 @@ jobs:
           SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           APK=app/build/outputs/apk/debug/app-debug.apk
           python3 scripts/verify-apk-native.py "$APK"
+          python3 scripts/verify-apk-secrets.py "$APK"
           "$SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose "$APK"
           "$SDK_ROOT/build-tools/35.0.0/apksigner" verify --print-certs "$APK" > app/build/outputs/apk/debug/APK-SIGNER.txt
           "$SDK_ROOT/build-tools/35.0.0/zipalign" -c -P 16 4 "$APK"
@@ -76,7 +90,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Coder-Abyss-APK-v0.7
+          name: Coder-Abyss-APK-v0.7.1
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/debug/app-debug.apk.sha256
@@ -86,5 +100,5 @@ jobs:
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Coder-Abyss-AAB-v0.7
+          name: Coder-Abyss-AAB-v0.7.1
           path: app/build/outputs/bundle/release/app-release.aab
