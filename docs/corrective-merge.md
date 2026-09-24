@@ -9,8 +9,8 @@ Android versionCode **8**, versionName **0.7.1**, compile/target SDK **36**.
 Build tools: AGP 8.9.2, Gradle 8.11.1, Java 17. Native revisions are unchanged.
 
 This is a buildable integration candidate, **not a deployed subscription product**.
-The owner confirmed Google/Firebase/Play are not configured yet and requested
-implementation plus setup documentation. No paid infrastructure was provisioned.
+The owner supplied Firebase Android/OAuth configuration and confirmed Google
+sign-in is Enabled on September 23, 2026. Play/Cloud Run setup remains pending. No paid infrastructure was provisioned.
 Normal cloud access fails closed until configured. The repair is delivered on its
 branch; main stays unchanged pending deployment configuration and phone acceptance.
 The delivery message records the exact commit, push and CI result.
@@ -51,8 +51,8 @@ use the gateway instead of a phone-owned provider credential.
 - Credential Manager Google sign-in exchanges the Google token for Firebase Auth.
   Firebase manages session persistence; sign-out clears authorization state without
   deleting local projects/models. Android backup is disabled to protect account
-  state. Public Firebase identifiers are explicit build configuration; defaults are
-  empty. No service-account key or HF token is a build property.
+  state. The Google Services plugin reads the supplied app/google-services.json
+  and generates the default Firebase options and Web OAuth audience. No service-account key or HF token is a build property.
 - Gateway validates Firebase signature/project/revocation, verified email and Google
   provider identity. No client email, role or paid boolean grants permission.
 - Play Billing 8 obtains current product/offer prices, launches the purchase UI,
@@ -235,3 +235,22 @@ Policy reference: https://developer.android.com/google/play/requirements/target-
 Toolchain reference: https://developer.android.com/build/releases/about-agp
 
 Final local API 36 AAB size: 66559246 bytes.
+
+## Firebase configuration follow-up (September 23, 2026)
+
+The supplied Android configuration matches package `com.coderabyss.mobile` and
+this machine's debug signing certificate. The owner confirmed Google provider is
+Enabled. Google Services 4.4.4 generates the default Firebase configuration and
+Web OAuth audience. Credential Manager/Firebase Auth dependencies remain pinned.
+The existing sign-in UI is retained; cancelling the picker is handled explicitly,
+and cloud account lookup failure does not invalidate successful Google sign-in.
+
+Validation: testDebugUnitTest (20 passed), lintDebug and assembleDebug succeeded.
+The actual APK signature matches the registered local debug certificate. All 18
+ARM64 libraries pass 16 KB alignment; llama/Whisper/Wan JNI exports and APK secret
+pattern checks passed. APK size: 94,821,188 bytes. APK SHA-256:
+`58a746d76588380fd9e3a1c480ace9a6207ffcce10d47f29258405f7bbec0149`.
+
+No device was connected. Real account-picker login, session restoration after
+process restart and sign-out must still be exercised on the phone. This follow-up
+builds the debug APK; the previously built release AAB predates this configuration.

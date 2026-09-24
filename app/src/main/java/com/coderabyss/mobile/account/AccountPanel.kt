@@ -11,6 +11,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.coderabyss.mobile.VideoBackendSettings
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import androidx.credentials.exceptions.GetCredentialCancellationException
 import org.json.JSONObject
 
 @Composable
@@ -22,11 +24,21 @@ fun AccountPanel(compact: Boolean = false) {
     var products by remember { mutableStateOf(emptyList<com.android.billingclient.api.ProductDetails>()) }
     val billing = remember { SubscriptionRepository(context, scope) { message = it } }
     DisposableEffect(billing) { onDispose { billing.close() } }
-    fun action(block: suspend () -> Unit) { if(busy) return; busy = true; scope.launch { try { block() } catch(_: Exception) { message = "Account service unavailable. Check your connection and sign in again; local projects remain available." } finally { busy = false } } }
+    fun action(block: suspend () -> Unit) { if(busy) return; busy = true; scope.launch { try { block() } catch(_: GetCredentialCancellationException) { message = "Sign-in cancelled." } catch(e: CancellationException) { throw e } catch(_: Exception) { message = "Account service unavailable. Check your connection and sign in again; local projects remain available." } finally { busy = false } } }
     Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if(!compact) Text("Account", style = MaterialTheme.typography.titleLarge)
         if(uid == null) {
-            Button(enabled = !busy && !VideoBackendSettings(context).localOnly, onClick = { action { auth.signIn(context as Activity); AuthorizationRepository.refresh(context) } }) { Text("Continue with Google") }
+            Button(enabled = !busy && auth.configured && !VideoBackendSettings(context).localOnly, onClick = { action {
+                auth.signIn(context as Activity)
+                message = "Signed in with Google."
+                if(context.getString(com.coderabyss.mobile.R.string.gateway_url).isBlank()) {
+                    message = "Signed in with Google. Cloud services are not configured yet."
+                } else {
+                    try { AuthorizationRepository.refresh(context) }
+                    catch(e: CancellationException) { throw e }
+                    catch(_: Exception) { message = "Signed in with Google. Cloud account details are temporarily unavailable." }
+                }
+            } }) { Text("Continue with Google") }
             if(!auth.configured) Text("Account sign-in is not configured for this build. Local projects are available.", style = MaterialTheme.typography.bodySmall)
         } else {
             Text(auth.displayName); Text("Plan: ${access.plan} · ${access.state}")

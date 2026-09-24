@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "342807159631",
+    "project_id": "coder-abyss",
+    "storage_bucket": "coder-abyss.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:342807159631:android:47964321c134b76bd59b3a",
+        "android_client_info": {
+          "package_name": "com.coderabyss.mobile"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "342807159631-ir7tpippb05odm6sbfqg2of66t912t7b.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.coderabyss.mobile",
+            "certificate_hash": "45fc10f57cfc4f233ab88e082c13a601f7c4b9ab"
+          }
+        },
+        {
+          "client_id": "342807159631-be34s9osrjomhvbv67mcgk7b1us6jcam.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBfFYBBzEn2NJsQ67HAiKzZhp1U8IV-_-w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "342807159631-be34s9osrjomhvbv67mcgk7b1us6jcam.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

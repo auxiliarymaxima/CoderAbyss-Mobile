@@ -1,4 +1,5 @@
 plugins {
+    id("com.google.gms.google-services")
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -16,7 +17,7 @@ android {
         versionCode = 8
         versionName = "0.7.1"
         // Public application identifiers only. No service credentials belong here.
-        listOf("gateway_url", "google_web_client_id", "firebase_app_id", "firebase_project_id", "firebase_api_key").forEach { name ->
+        listOf("gateway_url").forEach { name ->
             resValue("string", name, providers.gradleProperty("coderAbyss.$name").orElse("").get())
         }
     }

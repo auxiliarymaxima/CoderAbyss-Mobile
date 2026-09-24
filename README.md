@@ -35,7 +35,7 @@ bottom navigation are restored in `presentation/`. MainActivity opens
 `CoderAbyssShell`, not `PlatformApp`. v0.7 repositories, workers, exports, research,
 model registry and independent Whisper/text execution remain underneath.
 
-**Deployment status:** Google/Firebase/Play/Cloud Run configuration is not supplied.
+**Deployment status:** Firebase Android/OAuth configuration is supplied. Play/Cloud Run deployment remains pending.
 The integration code builds, but live account/billing/gateway acceptance is not
 complete. Cloud generation fails closed until configured. Local features remain
 accessible through “Continue with local projects.” Do not treat this as an already
@@ -192,17 +192,28 @@ themed-icon and Recent Apps checks remain on the device checklist.
 
 ## Public Android deployment configuration
 
-Set these **public** values using Gradle properties (local user Gradle properties
-or protected CI configuration). Do not put private service credentials in them:
+The Google Services Gradle plugin reads `app/google-services.json` for the
+registered Android app and Web OAuth client. These are public application
+identifiers, not service-account credentials. Never add a private key or server
+credential to this file. Enable Google in Firebase Authentication > Sign-in method.
 
-- `coderAbyss.gateway_url` — trusted HTTPS gateway origin, no path.
-- `coderAbyss.google_web_client_id` — Web OAuth client ID.
-- `coderAbyss.firebase_app_id` — registered Firebase Android app ID.
-- `coderAbyss.firebase_project_id` — Firebase project ID.
-- `coderAbyss.firebase_api_key` — public Firebase API identifier, restricted to the
-  appropriate app/APIs in Google Cloud. It is not an authentication bypass.
+Credential Manager obtains a Google ID token and Firebase Auth exchanges it for a
+real session. Firebase persists and refreshes that session across app restarts.
+Sign-out clears Firebase and Credential Manager state and cached authorization;
+local projects remain intact. Local Only blocks starting remote sign-in.
 
-Empty defaults intentionally disable account/cloud access. Register each signing
-certificate correctly. Fresh CI debug keystores may differ; production upgrades
-need a stable protected signing key/Play App Signing. Do not uninstall an existing
-app containing needed projects just to work around a signing mismatch.
+Set `coderAbyss.gateway_url` as a Gradle property to the trusted HTTPS gateway
+origin (no path). An empty gateway does not prevent Google sign-in, but cloud
+account/subscription features remain unavailable. Signing in grants no admin or
+paid entitlement by itself.
+
+Register each signing certificate correctly. The supplied configuration matches
+this machine's debug certificate. Fresh CI debug keystores may differ; production
+upgrades need a stable protected signing key/Play App Signing. Register those
+certificates separately. Do not uninstall an existing app containing needed
+projects just to work around a signing mismatch.
+
+Phone acceptance: sign in with Google, close/reopen the app and confirm the account
+remains signed in, then sign out and confirm local projects remain accessible.
+Repeat sign-in after cancelling the account picker; cancellation must not create
+a session. Confirm the user appears in Firebase Authentication's Users list.
