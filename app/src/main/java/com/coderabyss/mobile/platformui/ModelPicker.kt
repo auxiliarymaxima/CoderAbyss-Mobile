@@ -14,10 +14,13 @@ import com.coderabyss.mobile.remote.SpaceRegistry
 import kotlinx.coroutines.delay
 
 @Composable
-fun ModelPicker(service: Service, selected: String, onSelect: (String) -> Unit, onModels: () -> Unit) {
+fun ModelPicker(service: Service, selected: String, onSelect: (String) -> Unit, onModels: () -> Unit, styled: Boolean = false) {
     val context = LocalContext.current
     var open by remember { mutableStateOf(false) }; var warning by remember { mutableStateOf<ModelDescriptor?>(null) }
-    TextButton(onClick = { open = true }) { Text(if(service == Service.COMPANION) "Models ▾" else "${runCatching { ModelRegistry.get(selected).name }.getOrDefault("Choose model")} ▾") }
+    if(styled) OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, WorkflowBorder), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)) {
+        Text(runCatching { ModelRegistry.get(selected).name }.getOrDefault("Choose model"), modifier = Modifier.weight(1f), color = androidx.compose.ui.graphics.Color.White, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+        Text(" ▾", color = WorkflowCyan)
+    } else TextButton(onClick = { open = true }) { Text(if(service == Service.COMPANION) "Models ▾" else "${runCatching { ModelRegistry.get(selected).name }.getOrDefault("Choose model")} ▾") }
     if (open) AlertDialog(onDismissRequest = { open = false }, title = { Text("Models for ${service.name.lowercase()}") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState())) {
             for (execution in ExecutionType.entries) {

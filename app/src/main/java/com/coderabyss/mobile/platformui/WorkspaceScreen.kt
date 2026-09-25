@@ -7,6 +7,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -45,7 +52,7 @@ fun WorkspaceScreen(id: String, vm: WorkspaceViewModel, onBack: () -> Unit, onMo
     val legacyDefault = when(service) { Service.COMPANION -> "lfm-2.5-1.2b-q4"; Service.APP, Service.RESEARCH -> "qwen-coder-1.5b-q4"; Service.VISUAL -> "sdxl"; Service.VIDEO -> "wan"; else -> "whisper-tiny-en" }
     val manager = remember { OfflineModelManager(context) }
     val default = remember(id) { if(service in setOf(Service.APP, Service.RESEARCH, Service.VIDEO, Service.VISUAL)) WorkflowRecommendations.defaultModel(service, DeviceCompatibility.snapshot(context), ModelRegistry.all().filter { it.local?.let(manager::isInstalled) == true }.map { it.id }.toSet(), VideoBackendSettings(context).localOnly, ModelRegistry.forService(service).filter { (WorkflowPerformance.speed(context, it.id) ?: Double.MAX_VALUE) < 2.0 }.map { it.id }.toSet()) else legacyDefault }
-    var tab by remember(id) { mutableStateOf("Create") }
+    var tab by rememberSaveable(id) { mutableStateOf("Create") }
     var advanced by remember(id) { mutableStateOf(false) }
     val selected = project.optString("preferredModel").ifBlank { prefs.getString(service.name, default) ?: default }
     val descriptor = runCatching { ModelRegistry.get(selected) }.getOrNull()
@@ -65,7 +72,7 @@ fun WorkspaceScreen(id: String, vm: WorkspaceViewModel, onBack: () -> Unit, onMo
             if(service == Service.APP) {
                 val sourceRoot = vm.projects.file(id, "source")
                 val files = sourceRoot.walkTopDown().filter { it.isFile && it.length() <= 64000 }.take(30).map { "File: ${it.relativeTo(sourceRoot).invariantSeparatorsPath}\n${it.readText().take(4000)}" }.joinToString("\n").take(16000)
-                parameters.put("prompt", project.optString("prompt") + if(files.isBlank()) "" else "\nModify the existing project. Return only changed files; preserve everything else. Existing files:\n$files")
+                parameters.put("prompt", project.optString("prompt") + "\nApp type: ${input.optString("appType", "Android · Kotlin")}. Template: ${input.optString("template", "Modern · Jetpack Compose")}." + if(files.isBlank()) "" else "\nModify the existing project. Return only changed files; preserve everything else. Existing files:\n$files")
             }
             if(service in setOf(Service.APP, Service.RESEARCH)) {
                 val assets = project.optJSONArray("assets") ?: JSONArray()
@@ -79,103 +86,129 @@ fun WorkspaceScreen(id: String, vm: WorkspaceViewModel, onBack: () -> Unit, onMo
         }.onFailure { message = it.message?.takeIf { text -> text.length < 240 } ?: "Could not start. Check the selected model and provider." }
     }
     pendingLocal?.let { request -> AlertDialog(onDismissRequest = { pendingLocal = null }, title = { Text("Heavy local model") }, text = { Text("This model may take a long time on this device. You can choose a remote model instead.") }, confirmButton = { TextButton(onClick = { localApproved = true; pendingLocal = null; submit(request) }) { Text("Run Locally Anyway") } }, dismissButton = { TextButton(onClick = { pendingLocal = null }) { Text("Choose another model") } }) }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth()) {
-            (listOf("Create", "Results", "Tasks") + if(service == Service.VIDEO) listOf("Edit") else emptyList()).forEach { label ->
-                TextButton(onClick = { tab = label }, modifier = Modifier.weight(1f)) { Text(label, color = if(tab == label) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
-        }
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if(tab == "Create") {
-        Row { TextButton(onClick = onBack) { Text("←") }; Text(serviceTitle(service), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge); ModelPicker(service, selected, {
-            vm.projects.update(id) { project -> project.put("preferredModel", it) }; prefs.edit().putString(service.name, it).apply()
-        }, onModels) }
-
-        Text(if(descriptor?.executionType == ExecutionType.LOCAL) "Local · Device runtime" else "Remote · Hugging Face", style = MaterialTheme.typography.labelMedium)
-        if (descriptor?.executionType == ExecutionType.HUGGING_FACE_SPACE) {
-            Text(if (VideoBackendSettings(context).localOnly) "Unavailable in Local Only mode." else if (SpaceRegistry.capability(context, selected)?.optBoolean("available") == true) "Cloud GPU · ${SpaceRegistry.health(context).name.replace('_', ' ')}" else "Cloud GPU · Configure / test connection")
-            TextButton(onClick = onSettings) { Text("AI Services") }
-        }
-        SavedTextField(project.optString("prompt"), if (service == Service.RESEARCH) "Topic and instructions" else "Prompt", { vm.projects.update(id) { project -> project.put("prompt", it) } }, 4)
-        PersistentVoiceControl(id, vm, tasks, onModels)
-        Row { TextButton(onClick = { advanced = true }) { Text("More options / Add files") } }
-        if(advanced) androidx.compose.ui.window.Dialog(onDismissRequest = { advanced = false }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-            Surface(Modifier.fillMaxSize()) { Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { advanced = false }) { Text("Done") }
-                SavedTextField(project.optString("title"), "Project name", { value -> vm.projects.update(id) { it.put("title", value) } })
-                WorkflowAttachments(project, vm)
-                if(service == Service.RESEARCH) ResearchWorkspace(project, vm, selected, active)
-                if(service == Service.APP) SourceEditor(project, vm)
-                if(service == Service.VISUAL) {
-                    SavedTextField(input.optString("negativePrompt"), "Negative prompt", { setting("negativePrompt", it) })
-                    SavedTextField(input.optLong("seed", -1).toString(), "Seed (-1 random)", { it.toLongOrNull()?.let { n -> setting("seed", n) } })
-                }
-                ManagedAssets(project, vm)
-            } }
-        }
-        when (service) {
+    val prompt = project.optString("prompt")
+    val count = VideoPromptRules.words(prompt)
+    val capability = SpaceRegistry.capability(context, selected)
+    val durations = capability?.optJSONArray("durations")?.let { a -> (0 until a.length()).map(a::getInt) } ?: emptyList()
+    val resolutions = capability?.optJSONArray("resolutions")?.let { a -> (0 until a.length()).map(a::getString) } ?: emptyList()
+    val duration = input.optInt("duration").takeIf { it in durations } ?: durations.firstOrNull()
+    val resolution = input.optString("resolution").takeIf { it in resolutions } ?: resolutions.firstOrNull()
+    val localOnly = VideoBackendSettings(context).localOnly
+    val remote = descriptor?.executionType == ExecutionType.HUGGING_FACE_SPACE
+    val canGenerate = !active && prompt.isNotBlank() && (!remote || (!localOnly && capability?.optBoolean("available") == true)) &&
+        (service != Service.VIDEO || (duration != null && resolution != null && (selected != "wan" || count <= 100)))
+    fun generate() {
+        when(service) {
             Service.RESEARCH -> {
-                Button(enabled = !active && project.optString("prompt").isNotBlank(), modifier = Modifier.fillMaxWidth(), onClick = {
-                    val draft = (project.optJSONArray("sections") ?: JSONArray()).let { a -> (0 until a.length()).joinToString("\n") { a.getJSONObject(it).optString("text") } }
-                    submit(JSONObject().put("wholePaper", true).put("prompt", "Write a complete document with headings appropriate to the request. Never invent citations. Request: ${project.optString("prompt")}\nSaved draft to revise when present: $draft\nSource metadata: ${project.optJSONArray("sources") ?: JSONArray()}"))
-                }) { Text(if((project.optJSONArray("sections")?.length() ?: 0) == 0) "Generate Paper" else "Revise Paper") }
+                val draft = (project.optJSONArray("sections") ?: JSONArray()).let { a -> (0 until a.length()).joinToString("\n") { a.getJSONObject(it).optString("text") } }
+                submit(JSONObject().put("wholePaper", true).put("prompt", "Write a complete document with headings appropriate to the request. Never invent citations. Request: $prompt\nSaved draft to revise when present: $draft\nSource metadata: ${project.optJSONArray("sources") ?: JSONArray()}"))
             }
             Service.VIDEO -> {
-                Row { listOf("wan" to "QUICK · Wan", "ltx" to "LONG · LTX").forEach { (model, label) -> FilterChip(selected == model, {
-                    vm.projects.update(id) { it.put("preferredModel", model) }; prefs.edit().putString(service.name, model).apply()
-                }, label = { Text(label) }) } }
-                val capability = SpaceRegistry.capability(context, selected)
-                val durations = capability?.optJSONArray("durations")?.let { a -> (0 until a.length()).map(a::getInt) } ?: emptyList()
-                val resolutions = capability?.optJSONArray("resolutions")?.let { a -> (0 until a.length()).map(a::getString) } ?: emptyList()
-                val duration = input.optInt("duration").takeIf { it in durations } ?: durations.firstOrNull()
-                val resolution = input.optString("resolution").takeIf { it in resolutions } ?: resolutions.firstOrNull()
-                ChoiceMenu("Duration", duration?.let { "$it seconds" } ?: "Unavailable", durations.map { "$it seconds" }) { setting("duration", it.substringBefore(' ').toInt()) }
-                ChoiceMenu("Resolution", resolution ?: "Unavailable", resolutions) { setting("resolution", it) }
-
-                val count = VideoPromptRules.words(project.optString("prompt"))
-                if (selected == "wan") {
-                    Text("$count / 100 words", color = if(count > 100) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
-                    Text("Wan video prompts are limited to 100 words for better generation quality.")
-                    if (count > 100) Text("Please shorten your prompt before generating.", color = MaterialTheme.colorScheme.error)
-                }
-                Button(enabled = !active && !VideoBackendSettings(context).localOnly && capability?.optBoolean("available") == true && duration != null && resolution != null && count > 0 && (selected != "wan" || count <= 100), onClick = {
-                    val parts = resolution!!.split('x'); val w = parts[0].toInt(); val h = parts[1].toInt()
-                    submit(JSONObject(input.toString()).put("duration", duration).put("resolution", resolution).put("aspectRatio", if (selected == "ltx") "5:3" else if (w == h) "1:1" else if(w > h) "30:17" else "17:30"))
-                }) { Text("Generate video") }
+                val parts = resolution!!.split('x'); val w = parts[0].toInt(); val h = parts[1].toInt()
+                submit(JSONObject(input.toString()).put("duration", duration).put("resolution", resolution).put("aspectRatio", if(selected == "ltx") "5:3" else if(w == h) "1:1" else if(w > h) "30:17" else "17:30"))
             }
-            Service.VISUAL -> {
-
-                ChoiceMenu("Style", input.optString("style", "As described"), listOf("As described", "Cinematic", "Illustration", "Photographic")) { setting("style", it) }
-                val sizes = SpaceRegistry.capability(context, selected)?.optJSONArray("resolutions")?.let { a -> (0 until a.length()).map(a::getString) } ?: emptyList()
-                ChoiceMenu("Resolution", input.optString("resolution", sizes.firstOrNull() ?: "Unavailable"), sizes) { setting("resolution", it) }
-
-
-                Button(enabled = !active && project.optString("prompt").isNotBlank() && !VideoBackendSettings(context).localOnly && SpaceRegistry.capability(context, selected)?.optBoolean("available") == true, modifier = Modifier.fillMaxWidth(), onClick = { submit(JSONObject(input.toString()).put("prompt", project.optString("prompt") + if(input.optString("style", "As described") == "As described") "" else "\nStyle: ${input.optString("style")}").put("resolution", input.optString("resolution", sizes.firstOrNull() ?: "512x512"))) }) { Text("Generate Visual") }
-            }
-            else -> {
-                Button(enabled = !active && project.optString("prompt").isNotBlank(), onClick = { submit() }) { Text(if(service == Service.APP) "Build My App" else "Send") }
-                if (service == Service.APP) {
-
-                    Text("APK/AAB compilation requires a configured isolated Android build worker. No build worker is connected.")
-                    TextButton(onClick = { runCatching { vm.tasks.submit(id, Operation.SOURCE_PACKAGE) }.onFailure { message = "Could not queue source export" } }) { Text("Export source ZIP") }
-
+            Service.VISUAL -> submit(JSONObject(input.toString()).put("prompt", prompt + if(input.optString("style", "As described") == "As described") "" else "\nStyle: ${input.optString("style")}").put("resolution", resolution ?: "512x512"))
+            else -> submit()
+        }
+    }
+    // Follow a running generation to its real result without submitting again.
+    val latestGeneration = current.firstOrNull { it.optString("operation") in setOf("TEXT", "IMAGE", "VIDEO", "VIDEO_EDIT") }
+    var watched by rememberSaveable(id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(latestGeneration?.toString()) {
+        latestGeneration?.let { task ->
+            if(task.optString("status") !in PersistentTaskStore.terminal) watched = task.optString("taskId")
+            if(tab == "Tasks" && task.optString("status") == "COMPLETED" && watched == task.optString("taskId")) { tab = "Results"; watched = null }
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val compact = maxHeight < 850.dp
+        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            WorkflowBrand(onBack, onSettings, (listOf("Create", "Results", "Tasks", "History") + if(service == Service.VIDEO) listOf("Edit") else emptyList()).map { label -> label to { tab = label } })
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                WorkflowBadge(service)
+                Text(serviceTitle(service), Modifier.weight(1f), fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                if(service != Service.RESEARCH || tab != "Create") Box(Modifier.widthIn(max = 132.dp)) {
+                    ModelPicker(service, selected, { vm.projects.update(id) { p -> p.put("preferredModel", it) }; prefs.edit().putString(service.name, it).apply() }, onModels, styled = true)
                 }
             }
+            if(tab != "Create") WorkflowTabs(listOf("Create", "Results", "Tasks", "History") + if(service == Service.VIDEO) listOf("Edit") else emptyList(), tab) { tab = it }
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if(tab == "Create") {
+                    WorkflowPrompt(prompt, when(service) { Service.APP -> "Describe the app you want…"; Service.VIDEO -> "Describe your video…"; Service.RESEARCH -> "Describe your research topic…"; else -> "Describe your visual…" },
+                        if(service == Service.VIDEO && selected == "wan") "$count / 100 words" else "${prompt.length} characters", service == Service.VIDEO && selected == "wan" && count > 100, compact,
+                        voice = if(service == Service.VIDEO) { { Column(horizontalAlignment = Alignment.CenterHorizontally) { PersistentVoiceControl(id, vm, tasks, onModels, workflowStyle = true) } } } else null) { text -> vm.projects.update(id) { it.put("prompt", text) } }
+                    if(service == Service.VIDEO && selected == "wan") {
+                        Text(if(count > 100) "Please shorten your prompt. Wan video prompts are limited to 100 words for better generation quality." else "Wan video prompts are limited to 100 words for better generation quality.", color = if(count > 100) MaterialTheme.colorScheme.error else WorkflowMuted, style = MaterialTheme.typography.labelSmall)
+                    }
+                    if(service != Service.VIDEO) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Top) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) { PersistentVoiceControl(id, vm, tasks, onModels, workflowStyle = true) }
+                        WorkflowAttachments(project, vm, compact = true)
+                    }
+                    when(service) {
+                        Service.APP -> {
+                            WorkflowChoice("App type", input.optString("appType", "Android · Kotlin"), listOf("Android · Kotlin", "Web app"), Icons.Rounded.Android) { setting("appType", it); setting("template", if(it == "Web app") "Responsive HTML / CSS" else "Modern · Jetpack Compose") }
+                            WorkflowChoice("Template", input.optString("template", "Modern · Jetpack Compose"), if(input.optString("appType", "Android · Kotlin") == "Web app") listOf("Responsive HTML / CSS", "React") else listOf("Modern · Jetpack Compose", "Android Views"), Icons.Rounded.Dashboard) { setting("template", it) }
+                        }
+                        Service.VIDEO -> {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                WorkflowChoice("Duration", duration?.let { "${it}s" } ?: "Unavailable", durations.map { "${it}s" }, Icons.Rounded.Schedule, Modifier.weight(1f)) { setting("duration", it.removeSuffix("s").toInt()) }
+                                WorkflowChoice("Aspect / size", resolution ?: "Unavailable", resolutions, Icons.Rounded.AspectRatio, Modifier.weight(1f)) { setting("resolution", it) }
+                            }
+                        }
+                        Service.VISUAL -> {
+                            WorkflowOption("Visual type", "Image", Icons.Rounded.Image)
+                            WorkflowChoice("Style", input.optString("style", "As described"), listOf("As described", "Cinematic", "Illustration", "Photographic"), Icons.Rounded.Palette) { setting("style", it) }
+                            WorkflowChoice("Aspect / size", resolution ?: "Unavailable", resolutions, Icons.Rounded.AspectRatio) { setting("resolution", it) }
+                        }
+                        Service.RESEARCH -> ModelPicker(service, selected, { vm.projects.update(id) { p -> p.put("preferredModel", it) }; prefs.edit().putString(service.name, it).apply() }, onModels, styled = true)
+                        else -> Unit
+                    }
+                    WorkflowOption(if(service == Service.VIDEO) "Advanced settings" else "More options", "Project, files & settings", Icons.Rounded.Tune, onClick = { advanced = true })
+                    if(service == Service.VIDEO) WorkflowMediaPreview(project, vm, small = true) { tab = "Results" }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(if(!remote) "● Local" else if(localOnly) "Unavailable while Local Only is enabled" else if(capability?.optBoolean("available") == true) "● Remote · Connected" else "○ Remote · Configure backend", color = WorkflowMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                        if(remote && !localOnly && capability?.optBoolean("available") != true) TextButton(onClick = onSettings) { Text("Connect") }
+                    }
+                    if(service == Service.APP) Text("Source generation · Build server not connected", style = MaterialTheme.typography.labelSmall, color = WorkflowMuted)
+                }
+                if(message.isNotBlank()) Text(message, color = MaterialTheme.colorScheme.error)
+                if(tab == "Tasks") {
+                    if(current.isEmpty()) WorkflowPanel { Text("No active work"); Text("Your generation progress will appear here.", color = WorkflowMuted) }
+                    current.take(6).forEach { task -> key(task.optString("taskId")) { WorkflowProgress(task, vm) } }
+                }
+                if(tab == "Edit" && service == Service.VIDEO) com.coderabyss.mobile.videoeditor.VideoEditor(project, vm)
+                if(tab == "History") WorkflowHistory(id, vm, active, inline = true)
+                if(tab == "Results") {
+                    if(service == Service.RESEARCH) WorkflowPaper(project, vm, active, onRevise = { tab = "Create" }, onAdvanced = { advanced = true }, tasks = tasks, onModels = onModels, onRevision = { request ->
+                        val draft = (project.optJSONArray("sections") ?: JSONArray()).let { a -> (0 until a.length()).joinToString("\n") { a.getJSONObject(it).optString("title") + "\n" + a.getJSONObject(it).optString("text") } }
+                        submit(JSONObject().put("wholePaper", true).put("prompt", "Revise this paper according to the request. Preserve supported claims. Never invent citations. Request: $request\nSaved paper: $draft\nSource metadata: ${project.optJSONArray("sources") ?: JSONArray()}"))
+                    })
+                    if(service == Service.APP) {
+                        WorkflowPanel { Text("Project files", style = MaterialTheme.typography.titleLarge); SourceEditor(project, vm) }
+                        WorkflowAction("Download source ZIP", !active) { runCatching { vm.tasks.submit(id, Operation.SOURCE_PACKAGE); tab = "Tasks" }.onFailure { message = "Could not queue source export" } }
+                        OutlinedButton(onClick = { tab = "Create" }, modifier = Modifier.fillMaxWidth()) { Text("Request changes") }
+                    }
+                    OutputGallery(project, vm, designed = true, onVary = { tab = "Create" })
+                }
+                Spacer(Modifier.height(4.dp))
+            }
+            if(tab == "Create") WorkflowAction(when(service) { Service.APP -> "Build My App"; Service.VIDEO -> "Generate Video"; Service.RESEARCH -> if((project.optJSONArray("sections")?.length() ?: 0) > 0) "Revise Paper" else "Generate Paper"; else -> "Generate Visual" }, canGenerate) { generate() }
+            Spacer(Modifier.height(4.dp))
         }
-        }
-        if (message.isNotBlank()) Text(message, color = MaterialTheme.colorScheme.error)
-        if(tab == "Tasks") current.take(6).forEach { task -> TaskCard(task, vm)
-            if(task.optString("operation") == "VIDEO_EDIT" && task.has("progress") && task.optString("status") !in PersistentTaskStore.terminal) LinearProgressIndicator(progress = { task.optInt("progress").coerceIn(0, 100) / 100f }, modifier = Modifier.fillMaxWidth())
-            if (task.optString("partial").isNotBlank()) Text(task.optString("partial"))
-        }
-        if(tab == "Edit" && service == Service.VIDEO) com.coderabyss.mobile.videoeditor.VideoEditor(project, vm)
-        if(tab == "Results") {
-        if(service == Service.RESEARCH) ResearchWorkspace(project, vm, selected, active)
-        if(service == Service.APP) SourceEditor(project, vm)
-        OutputGallery(project, vm)
-        WorkflowHistory(id, vm, active)
-        }
-        }
+    }
+    if(advanced) androidx.compose.ui.window.Dialog(onDismissRequest = { advanced = false }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize(), color = WorkflowNavy) { Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) { Text("More options", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge); TextButton(onClick = { advanced = false }) { Text("Done") } }
+            SavedTextField(project.optString("title"), "Project name", { value -> vm.projects.update(id) { it.put("title", value) } })
+            WorkflowAttachments(project, vm)
+            if(service == Service.RESEARCH) ResearchWorkspace(project, vm, selected, active)
+            if(service == Service.APP) SourceEditor(project, vm)
+            if(service == Service.VISUAL) {
+                SavedTextField(input.optString("negativePrompt"), "Negative prompt", { setting("negativePrompt", it) })
+                SavedTextField(input.optLong("seed", -1).toString(), "Seed (-1 random)", { it.toLongOrNull()?.let { n -> setting("seed", n) } })
+            }
+            ManagedAssets(project, vm)
+        } }
     }
 }
 
@@ -188,7 +221,7 @@ fun ChoiceMenu(label: String, selected: String, options: List<String>, onSelect:
 }
 
 @Composable
-fun PersistentVoiceControl(projectId: String, vm: WorkspaceViewModel, tasks: List<JSONObject>, onModels: () -> Unit, prominent: Boolean = false) {
+fun PersistentVoiceControl(projectId: String, vm: WorkspaceViewModel, tasks: List<JSONObject>, onModels: () -> Unit, prominent: Boolean = false, workflowStyle: Boolean = false) {
     val context = LocalContext.current; var error by remember { mutableStateOf("") }
     val voiceTasks = tasks.filter { it.optString("operation") == "TRANSCRIBE" && it.optString("status") !in PersistentTaskStore.terminal }
     val recording = voiceTasks.firstOrNull { it.optString("status") == "RECORDING" }
@@ -214,7 +247,9 @@ fun PersistentVoiceControl(projectId: String, vm: WorkspaceViewModel, tasks: Lis
         }
     }
     val label = if(recording != null) "Stop and transcribe" else if(voiceTasks.isNotEmpty()) "Transcribing…" else "Tap to Speak"
-    if(prominent) {
+    if(workflowStyle) {
+        WorkflowRoundAction(if(recording != null) Icons.Rounded.Stop else Icons.Rounded.Mic, label, voiceTasks.isEmpty() || recording != null, glowing = true, onClick = toggle)
+    } else if(prominent) {
         com.coderabyss.mobile.presentation.MicrophoneButton(voiceTasks.isEmpty() || recording != null, toggle)
         Text(label)
     } else OutlinedButton(enabled = recording != null || voiceTasks.isEmpty(), onClick = toggle) { Text(label) }

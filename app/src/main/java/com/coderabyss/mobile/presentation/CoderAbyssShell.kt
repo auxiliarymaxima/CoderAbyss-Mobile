@@ -57,11 +57,15 @@ fun CoderAbyssShell(vm: WorkspaceViewModel = viewModel()) {
             TextButton(onClick = { localEntry = true }) { Text("Continue with local projects") }
         }; return
     }
+    val workflowService = if(page == "Workspace") projectId?.let { runCatching { Service.valueOf(vm.projects.read(it).getString("type")) }.getOrNull() }?.takeIf { it in setOf(Service.APP, Service.VIDEO, Service.RESEARCH, Service.VISUAL) } else null
     Scaffold(containerColor = AbyssBlack, topBar = {
         Column(Modifier.statusBarsPadding()) {
-            if(tasks.isNotEmpty()) TextButton(onClick = { showTasks = true }) { Text("Tasks · ${tasks.count { it.optString("status") !in PersistentTaskStore.terminal }}") }
+            if(tasks.isNotEmpty() && workflowService == null) TextButton(onClick = { showTasks = true }) { Text("Tasks · ${tasks.count { it.optString("status") !in PersistentTaskStore.terminal }}") }
         }
-    }, bottomBar = { AbyssBottomBar(listOf("Home", "Projects", "Models", "Settings").indexOf(page)) { page = listOf("Home", "Projects", "Models", "Settings")[it] } }) { padding ->
+    }, bottomBar = {
+        if(workflowService != null) WorkflowNavigation(workflowService, { page = "Home" }, service, { page = "Projects" }, { page = "Models" }, { page = "Settings" }, { showTasks = true })
+        else AbyssBottomBar(listOf("Home", "Projects", "Models", "Settings").indexOf(page)) { page = listOf("Home", "Projects", "Models", "Settings")[it] }
+    }) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).background(Brush.verticalGradient(listOf(AbyssBlack, AbyssPanel, AbyssBlack)))) {
             when(page) {
                 "Home" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {

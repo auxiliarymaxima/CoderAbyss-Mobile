@@ -42,7 +42,8 @@ fun LocalImage(file: File, modifier: Modifier = Modifier, zoom: Boolean = false)
 }
 
 @Composable
-fun OutputGallery(project: JSONObject, vm: WorkspaceViewModel) {
+fun OutputGallery(project: JSONObject, vm: WorkspaceViewModel, designed: Boolean = false, onVary: () -> Unit = {}) {
+    if(designed) { WorkflowResults(project, vm, onVary); return }
     val id = project.getString("projectId"); val context = LocalContext.current
     val array = project.optJSONArray("outputs") ?: JSONArray(); val outputs = (0 until array.length()).map(array::getJSONObject)
     val images = outputs.filter { it.optString("mimeType").startsWith("image/") && vm.projects.file(id, it.getString("path")).isFile }
