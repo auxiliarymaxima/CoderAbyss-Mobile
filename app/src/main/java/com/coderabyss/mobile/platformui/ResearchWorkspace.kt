@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.coderabyss.mobile.VideoBackendSettings
 import com.coderabyss.mobile.exports.DocumentExporter
 import com.coderabyss.mobile.research.CitationFormatter
@@ -19,7 +20,7 @@ import java.util.UUID
 @Composable
 fun ResearchWorkspace(project: JSONObject, vm: WorkspaceViewModel, model: String, busy: Boolean) {
     val id = project.getString("projectId"); val context = LocalContext.current
-    var tab by remember(id) { mutableStateOf("EDIT") }; var message by remember { mutableStateOf("") }
+    var tab by remember(id) { mutableStateOf(if((project.optJSONArray("sections")?.length() ?: 0) > 0) "PREVIEW" else "EDIT") }; var message by remember { mutableStateOf("") }
     var sourceEditor by remember { mutableStateOf<JSONObject?>(null) }; var sectionDelete by remember { mutableStateOf<String?>(null) }
     val sections = project.optJSONArray("sections") ?: JSONArray(); val sources = project.optJSONArray("sources") ?: JSONArray()
     val metadata = project.optJSONObject("metadata") ?: JSONObject(); val style = metadata.optString("citationStyle", "APA")
@@ -98,7 +99,15 @@ fun ResearchWorkspace(project: JSONObject, vm: WorkspaceViewModel, model: String
         "PREVIEW" -> {
             val content = DocumentExporter.content(project)
             Text(content.title, style = MaterialTheme.typography.headlineMedium); Text(content.author)
-            content.sections.forEach { Text(it.title, style = MaterialTheme.typography.titleLarge); Text(it.text) }
+            var search by remember { mutableStateOf("") }; var font by remember { mutableFloatStateOf(16f) }
+            OutlinedTextField(search, { search = it }, label = { Text("Find in document") }, singleLine = true)
+            Row { TextButton(onClick = { font = (font - 2).coerceAtLeast(12f) }) { Text("A−") }; TextButton(onClick = { font = (font + 2).coerceAtMost(28f) }) { Text("A+") } }
+            content.sections.filter { search.isBlank() || it.title.contains(search, true) || it.text.contains(search, true) }.forEach { section ->
+                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
+                    Text(section.title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(8.dp)); Text(section.text, fontSize = font.sp)
+                } }
+            }
         }
         else -> {
             Text("Exports use the saved sections and source metadata. PPTX creates a concise presentation; XLSX contains structured sources and findings.")

@@ -16,7 +16,7 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-enum class Operation { TEXT, IMAGE, VIDEO, EXPORT, WEB_SEARCH, TRANSCRIBE, SOURCE_PACKAGE, MEDIA_EXPORT, COPY_ASSET, CHART }
+enum class Operation { TEXT, IMAGE, VIDEO, EXPORT, WEB_SEARCH, TRANSCRIBE, SOURCE_PACKAGE, MEDIA_EXPORT, COPY_ASSET, CHART, IMPORT_ASSET, VIDEO_EDIT }
 
 class PersistentTaskStore(context: Context) {
     private val root = File(context.applicationContext.filesDir, "Tasks").apply { mkdirs() }
@@ -51,7 +51,7 @@ class TaskManager(context: Context) {
     val projects = ProjectRepository(app)
     fun submit(projectId: String, operation: Operation, model: String = "", parameters: JSONObject = JSONObject()): String = synchronized(com.coderabyss.mobile.projects.ProjectLocks.lock) {
         val project = projects.read(projectId)
-        if(operation in setOf(Operation.TEXT, Operation.IMAGE, Operation.VIDEO)) check(!activeForProject(projectId)) { "This project already has active work. Open Tasks to view it." }
+        if(operation in setOf(Operation.TEXT, Operation.IMAGE, Operation.VIDEO, Operation.VIDEO_EDIT)) check(!activeForProject(projectId)) { "This project already has active work. Open Tasks to view it." }
         val id = UUID.randomUUID().toString(); val now = System.currentTimeMillis()
         val type = Service.valueOf(project.getString("type"))
         val settings = VideoBackendSettings(app)

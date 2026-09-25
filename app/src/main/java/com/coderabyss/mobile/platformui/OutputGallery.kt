@@ -62,6 +62,7 @@ fun OutputGallery(project: JSONObject, vm: WorkspaceViewModel) {
                 val player = remember(path) { android.widget.VideoView(context) }
                 DisposableEffect(path) { onDispose { player.stopPlayback() } }
                 AndroidView(factory = { player.apply { setMediaController(android.widget.MediaController(context).also { it.setAnchorView(this) }); setVideoPath(file.path) } }, modifier = Modifier.fillMaxWidth().height(240.dp))
+                TextButton(onClick = { runCatching { com.coderabyss.mobile.videoeditor.VideoTimeline.add(vm.projects, id, path) }.onSuccess { message = "Added to Video. Open Edit to arrange clips." }.onFailure { message = "Could not add video" } }) { Text("Add to Video") }
                 Row { TextButton(onClick = { player.start() }) { Text("Play") }; TextButton(onClick = { player.seekTo(0); player.start() }) { Text("Replay") } }
             }
             Text("${output.optString("model")} · ${output.optString("resolution")} · ${file.length()} bytes${if(output.has("duration")) " · ${output.optDouble("duration")} s" else ""}")
@@ -76,7 +77,7 @@ fun OutputGallery(project: JSONObject, vm: WorkspaceViewModel) {
             }
             Row {
                 TextButton(onClick = { rename = output; name = output.optString("displayName", file.name) }) { Text("Rename") }
-                TextButton(onClick = { deletion = output }) { Text("Delete") }
+                TextButton(enabled = (project.optJSONArray("timeline") ?: JSONArray()).let { clips -> (0 until clips.length()).none { clips.getJSONObject(it).optString("path") == path } }, onClick = { deletion = output }) { Text("Delete") }
                 if(output.optString("prompt").isNotBlank()) TextButton(onClick = { vm.projects.update(id) { it.put("prompt", output.optString("prompt")).put("preferredModel", output.optString("model", it.optString("preferredModel"))); output.optJSONObject("settings")?.let { settings -> it.put("generationSettings", JSONObject(settings.toString())) } }; message = "Original prompt and settings restored above. Edit for a variation, then Generate." }) { Text("Regenerate / Vary") }
             }
         } } }
