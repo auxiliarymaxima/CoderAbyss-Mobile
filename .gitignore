@@ -18,3 +18,8 @@ __pycache__/
 .venv/
 .env
 service-account*.json
+*.keystore
+*.jks
+*.p12
+*.pfx
+*-signing*.clixml

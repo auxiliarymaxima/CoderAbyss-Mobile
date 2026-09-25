@@ -5,8 +5,12 @@ on:
     branches:
       - main
       - fix/v07-v06-ui-auth-subscriptions-branding
+      - codex/scoped-workflows-video-editor
 
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
 
@@ -85,21 +89,62 @@ jobs:
           sha256sum app-debug.apk > app-debug.apk.sha256
           stat -c '%s bytes' app-debug.apk > APK-SIZE.txt
 
-      - name: Build release AAB
-        run: gradle bundleRelease --console=plain
+      - name: Restore private release signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.CODER_ABYSS_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo "Missing CODER_ABYSS_KEYSTORE_BASE64 signing secret"; exit 1; }
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/coder-abyss-release.p12"
+          echo "CODER_ABYSS_KEYSTORE_PATH=$RUNNER_TEMP/coder-abyss-release.p12" >> "$GITHUB_ENV"
 
-      - name: Upload APK
+      - name: Build signed release APK and AAB
+        env:
+          CODER_ABYSS_KEYSTORE_PASSWORD: ${{ secrets.CODER_ABYSS_KEYSTORE_PASSWORD }}
+          CODER_ABYSS_KEY_ALIAS: ${{ secrets.CODER_ABYSS_KEY_ALIAS }}
+          CODER_ABYSS_KEY_PASSWORD: ${{ secrets.CODER_ABYSS_KEY_PASSWORD }}
+        run: gradle :app:assembleRelease :app:bundleRelease --console=plain
+
+      - name: Verify signed release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          APK=app/build/outputs/apk/release/app-release.apk
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          python3 scripts/verify-apk-native.py "$APK"
+          python3 scripts/verify-apk-secrets.py "$APK"
+          "$SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee app/build/outputs/apk/release/APK-SIGNER.txt
+          "$SDK_ROOT/build-tools/35.0.0/zipalign" -c -P 16 4 "$APK"
+          python3 -c 'import sys,zipfile; names=zipfile.ZipFile(sys.argv[1]).namelist(); assert any(n.startswith("META-INF/") and n.endswith((".RSA", ".EC", ".DSA")) for n in names), "Unsigned AAB"' "$AAB"
+          jarsigner -verify "$AAB" > app/build/outputs/bundle/release/AAB-VERIFICATION.txt
+          grep -q 'jar verified' app/build/outputs/bundle/release/AAB-VERIFICATION.txt
+          keytool -printcert -jarfile "$AAB" > app/build/outputs/bundle/release/AAB-SIGNER.txt
+          sha256sum "$APK" > app/build/outputs/apk/release/app-release.apk.sha256
+          sha256sum "$AAB" > app/build/outputs/bundle/release/app-release.aab.sha256
+
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: Coder-Abyss-APK-v0.7.1
+          name: Coder-Abyss-Signed-APK-v0.7.1
           path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/debug/app-debug.apk.sha256
-            app/build/outputs/apk/debug/APK-SIZE.txt
-            app/build/outputs/apk/debug/APK-SIGNER.txt
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/apk/release/app-release.apk.sha256
+            app/build/outputs/apk/release/APK-SIGNER.txt
 
-      - name: Upload AAB
+      - name: Upload signed AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Coder-Abyss-AAB-v0.7.1
-          path: app/build/outputs/bundle/release/app-release.aab
+          name: Coder-Abyss-Signed-AAB-v0.7.1
+          path: |
+            app/build/outputs/bundle/release/app-release.aab
+            app/build/outputs/bundle/release/app-release.aab.sha256
+            app/build/outputs/bundle/release/AAB-SIGNER.txt
+            app/build/outputs/bundle/release/AAB-VERIFICATION.txt
+
+      - name: Remove temporary signing key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/coder-abyss-release.p12"

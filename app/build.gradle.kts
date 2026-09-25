@@ -24,6 +24,20 @@ android {
 
     defaultConfig { ndk { abiFilters += "arm64-v8a" } }
 
+    // Signing material is supplied by the local secure store or GitHub Actions Secrets.
+    // No credential or private key is stored in this repository or packaged in the app.
+    providers.environmentVariable("CODER_ABYSS_KEYSTORE_PATH").orNull?.let { path ->
+        fun requiredSigningValue(name: String): String = providers.environmentVariable(name).orNull
+            ?.takeIf { it.isNotBlank() } ?: error("Missing signing environment variable: $name")
+        signingConfigs.create("privateRelease") {
+            storeFile = file(path)
+            storePassword = requiredSigningValue("CODER_ABYSS_KEYSTORE_PASSWORD")
+            keyAlias = requiredSigningValue("CODER_ABYSS_KEY_ALIAS")
+            keyPassword = requiredSigningValue("CODER_ABYSS_KEY_PASSWORD")
+        }
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("privateRelease")
+    }
+
     testOptions { unitTests.isIncludeAndroidResources = true }
 
     buildFeatures {
