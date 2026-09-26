@@ -75,6 +75,9 @@ jobs:
       - name: Build debug APK
         run: gradle :app:testDebugUnitTest assembleDebug --console=plain
 
+      - name: Test Firebase signing configuration guard
+        run: python3 -m unittest discover -s scripts -p 'test_firebase_signing.py' -v
+
       - name: Verify APK and publish checksum
         shell: bash
         run: |
@@ -117,6 +120,7 @@ jobs:
           python3 scripts/verify-apk-native.py "$APK"
           python3 scripts/verify-apk-secrets.py "$APK"
           "$SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee app/build/outputs/apk/release/APK-SIGNER.txt
+          python3 scripts/verify-firebase-signing.py app/google-services.json app/build/outputs/apk/release/APK-SIGNER.txt
           "$SDK_ROOT/build-tools/35.0.0/zipalign" -c -P 16 4 "$APK"
           python3 -c 'import sys,zipfile; names=zipfile.ZipFile(sys.argv[1]).namelist(); assert any(n.startswith("META-INF/") and n.endswith((".RSA", ".EC", ".DSA")) for n in names), "Unsigned AAB"' "$AAB"
           jarsigner -verify "$AAB" > app/build/outputs/bundle/release/AAB-VERIFICATION.txt

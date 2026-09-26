@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "342807159631-jmdbr2naq1ph818nklp415m8ustcvceh.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.coderabyss.mobile",
+            "certificate_hash": "773dbfcba6d9c2933914b8a7c19c491adbc85361"
+          }
+        },
+        {
           "client_id": "342807159631-be34s9osrjomhvbv67mcgk7b1us6jcam.apps.googleusercontent.com",
           "client_type": 3
         }

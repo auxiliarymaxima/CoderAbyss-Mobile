@@ -17,8 +17,10 @@ class FirebaseConfigurationTest {
         val options = FirebaseOptions.fromResource(context)
         assertNotNull(options)
         assertEquals("coder-abyss", options!!.projectId)
-        assertFalse(options.applicationId.isBlank())
+        assertEquals("com.coderabyss.mobile", context.packageName)
+        assertEquals("1:342807159631:android:47964321c134b76bd59b3a", options.applicationId)
         assertFalse(options.apiKey.isBlank())
-        assertTrue(context.getString(R.string.default_web_client_id).endsWith(".apps.googleusercontent.com"))
+        // Public Web client ID from the registered app, never the Android OAuth client ID.
+        assertEquals("342807159631-be34s9osrjomhvbv67mcgk7b1us6jcam.apps.googleusercontent.com", context.getString(R.string.default_web_client_id))
     }
 }
